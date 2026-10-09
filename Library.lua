@@ -1238,8 +1238,6 @@ function library:GetConfigs(universal)
     return configs
 end
 
-local savedBehavior
-
 function library:ToggleUI(visible)
     Services.ContextActionService:UnbindAction("disablekeyboard")
     Services.ContextActionService:UnbindAction("disablemouse")
@@ -1264,10 +1262,8 @@ function library:ToggleUI(visible)
     local input = Services.UserInputService
 
     if self.open then
-        savedBehavior = input.MouseBehavior
         input.MouseBehavior = Enum.MouseBehavior.Default
-    else
-        input.MouseBehavior = savedBehavior
+        input.MouseIconEnabled = true
     end
 end
 
