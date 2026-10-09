@@ -888,6 +888,7 @@ function utility.dragify(object, dragoutline)
         if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
             currentpos = UDim2.new(objectposition.X.Scale, objectposition.X.Offset + (input.Position - start).X, objectposition.Y.Scale, objectposition.Y.Offset + (input.Position - start).Y)
             dragoutline.Position = currentpos
+            object.Position = currentpos
         end
     end)
 
@@ -1238,7 +1239,6 @@ function library:GetConfigs(universal)
 end
 
 local savedBehavior
-local mouseOverrideActive = false
 local mouseBindingName = "LibraryFreeMouse"
 
 function library:ToggleUI(visible)
@@ -1258,28 +1258,16 @@ function library:ToggleUI(visible)
 
     if self.cursor then
         self.cursor.Visible = self.open
+        
     end
 
     local input = Services.UserInputService
     local runService = Services.RunService
 
     if self.open then
-        if not mouseOverrideActive then
-            savedBehavior = input.MouseBehavior
-            mouseOverrideActive = true
-
-            runService:BindToRenderStep(
-                mouseBindingName,
-                Enum.RenderPriority.Camera.Value + 1,
-                function()
-                    input.MouseBehavior = Enum.MouseBehavior.Default
-                end
-            )
-        end
-    elseif mouseOverrideActive then
-        runService:UnbindFromRenderStep(mouseBindingName)
-        mouseOverrideActive = false
-
+        savedBehavior = input.MouseBehavior
+        input.MouseBehavior = Enum.MouseBehavior.Default
+    else
         input.MouseBehavior = savedBehavior
     end
 end
@@ -2708,6 +2696,29 @@ function library:Load(options)
     if extension then
         self.extension = extension
     end
+
+    local cursor = utility.create("Triangle", {
+        Thickness = 2,
+        Color = Color3.fromRGB(200, 150, 200),
+        ZIndex = 1000
+    })
+
+    self.cursor = cursor
+
+	if self.cursor then
+		Services.InputService.MouseIconEnabled = false
+
+		utility.connect(Services.RunService.RenderStepped, function()
+			if self.open then
+				local mousepos = Services.InputService:GetMouseLocation()
+				cursor.PointA = mousepos
+				cursor.PointB = mousepos + Vector2.new(15, 12.5)
+				cursor.PointC = mousepos + Vector2.new(0, 20)
+				cursor.Filled = true
+			end
+		end)
+	end
+
 
     local holder = utility.create("Square", {
         Transparency = 0,
