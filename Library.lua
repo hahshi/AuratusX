@@ -1052,7 +1052,7 @@ local themes = {
         ["Object Background"] = Color3.fromRGB(25, 42, 55),
         ["Object Border"] = Color3.fromRGB(45, 70, 85),
         ["Dropdown Option Background"] = Color3.fromRGB(19, 34, 46),
-    },
+    }
 }
 
 local themeobjects = {}
