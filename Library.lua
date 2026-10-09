@@ -1237,6 +1237,10 @@ function library:GetConfigs(universal)
     return configs
 end
 
+local savedBehavior
+local mouseOverrideActive = false
+local mouseBindingName = "LibraryFreeMouse"
+
 function library:ToggleUI(visible)
     Services.ContextActionService:UnbindAction("disablekeyboard")
     Services.ContextActionService:UnbindAction("disablemouse")
@@ -1254,6 +1258,29 @@ function library:ToggleUI(visible)
 
     if self.cursor then
         self.cursor.Visible = self.open
+    end
+
+    local input = Services.UserInputService
+    local runService = Services.RunService
+
+    if self.open then
+        if not mouseOverrideActive then
+            savedBehavior = input.MouseBehavior
+            mouseOverrideActive = true
+
+            runService:BindToRenderStep(
+                mouseBindingName,
+                Enum.RenderPriority.Camera.Value + 1,
+                function()
+                    input.MouseBehavior = Enum.MouseBehavior.Default
+                end
+            )
+        end
+    elseif mouseOverrideActive then
+        runService:UnbindFromRenderStep(mouseBindingName)
+        mouseOverrideActive = false
+
+        input.MouseBehavior = savedBehavior
     end
 end
 
