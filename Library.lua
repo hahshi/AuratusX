@@ -1221,11 +1221,16 @@ function library:GetConfigs(universal)
     return configs
 end
 
-function library:Close()
+function library:Close(visible)
     Services.ContextActionService:UnbindAction("disablekeyboard")
     Services.ContextActionService:UnbindAction("disablemouse")
 
-    self.open = not self.open
+    if visible == nil then
+        self.open = not self.open
+    else
+        assert(type(visible) == "boolean", "Expected a boolean or nil")
+        self.open = visible
+    end
 
     if self.holder then
         self.holder.Visible = self.open
@@ -1332,35 +1337,6 @@ function library:SaveCustomTheme(name)
     end
 
     return false
-end
-
-function library:Unload()
-    Services.ContextActionService:UnbindAction("disablekeyboard")
-    Services.ContextActionService:UnbindAction("disablemouse")
-
-    if self.open then
-        library:Close()
-    end
-
-    if self.holder then
-        self.holder:Remove()
-    end
-
-    if self.cursor then
-        self.cursor:Remove()
-    end
-
-    if self.watermarkobject then
-       self.watermarkobject:Remove() 
-    end
-
-    for _, connection in next, self.connections do
-        connection:Disconnect()
-    end
-
-    table.clear(self.connections)
-    table.clear(self.flags)
-    table.clear(flags)
 end
 
 local allowedcharacters = {}
