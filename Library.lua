@@ -1007,22 +1007,6 @@ end
 
 local themes = {
     Default = {
-        ["Accent"] = Color3.fromRGB(113, 93, 133),
-        ["Window Background"] = Color3.fromRGB(30, 30, 30),
-        ["Window Border"] = Color3.fromRGB(45, 45, 45),
-        ["Tab Background"] = Color3.fromRGB(20, 20, 20),
-        ["Tab Border"] = Color3.fromRGB(45, 45, 45),
-        ["Tab Toggle Background"] = Color3.fromRGB(28, 28, 28),
-        ["Section Background"] = Color3.fromRGB(18, 18, 18),
-        ["Section Border"] = Color3.fromRGB(35, 35, 35),
-        ["Text"] = Color3.fromRGB(200, 200, 200),
-        ["Disabled Text"] = Color3.fromRGB(110, 110, 110),
-        ["Object Background"] = Color3.fromRGB(25, 25, 25),
-        ["Object Border"] = Color3.fromRGB(35, 35, 35),
-        ["Dropdown Option Background"] = Color3.fromRGB(19, 19, 19)
-    },
-
-    Midnight = {
         ["Accent"] = Color3.new(1, 0.5, 0),
         ["Window Background"] = Color3.fromRGB(30, 30, 36),
         ["Window Border"] = Color3.fromRGB(45, 45, 49),
@@ -1036,7 +1020,39 @@ local themes = {
         ["Object Background"] = Color3.fromRGB(25, 25, 29),
         ["Object Border"] = Color3.fromRGB(35, 35, 39),
         ["Dropdown Option Background"] = Color3.fromRGB(19, 19, 23)
-    }
+    },
+
+    Light = {
+        ["Accent"] = Color3.fromRGB(100, 70, 210),
+        ["Window Background"] = Color3.fromRGB(255, 255, 255),
+        ["Window Border"] = Color3.fromRGB(190, 190, 195),
+        ["Tab Background"] = Color3.fromRGB(245, 245, 248),
+        ["Tab Border"] = Color3.fromRGB(200, 200, 205),
+        ["Tab Toggle Background"] = Color3.fromRGB(230, 225, 245),
+        ["Section Background"] = Color3.fromRGB(250, 250, 252),
+        ["Section Border"] = Color3.fromRGB(215, 215, 220),
+        ["Text"] = Color3.fromRGB(0, 0, 0),
+        ["Disabled Text"] = Color3.fromRGB(100, 100, 110),
+        ["Object Background"] = Color3.fromRGB(235, 235, 240),
+        ["Object Border"] = Color3.fromRGB(190, 190, 200),
+        ["Dropdown Option Background"] = Color3.fromRGB(245, 245, 248),
+    },
+
+    Ocean = {
+        ["Accent"] = Color3.fromRGB(65, 200, 220),
+        ["Window Background"] = Color3.fromRGB(20, 30, 40),
+        ["Window Border"] = Color3.fromRGB(45, 70, 85),
+        ["Tab Background"] = Color3.fromRGB(15, 24, 33),
+        ["Tab Border"] = Color3.fromRGB(40, 65, 80),
+        ["Tab Toggle Background"] = Color3.fromRGB(28, 48, 62),
+        ["Section Background"] = Color3.fromRGB(16, 27, 36),
+        ["Section Border"] = Color3.fromRGB(35, 55, 70),
+        ["Text"] = Color3.fromRGB(220, 235, 245),
+        ["Disabled Text"] = Color3.fromRGB(115, 140, 155),
+        ["Object Background"] = Color3.fromRGB(25, 42, 55),
+        ["Object Border"] = Color3.fromRGB(45, 70, 85),
+        ["Dropdown Option Background"] = Color3.fromRGB(19, 34, 46),
+    },
 }
 
 local themeobjects = {}
