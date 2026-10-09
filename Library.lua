@@ -1260,11 +1260,13 @@ function library:ToggleUI(visible)
     end
 
     local input = Services.UserInputService
+    input.MouseBehavior = Enum.MouseBehavior.Default
+    input.MouseIconEnabled = true
 
-    if self.open then
-        input.MouseBehavior = Enum.MouseBehavior.Default
-        input.MouseIconEnabled = true
-    end
+    -- if self.open then
+    --     input.MouseBehavior = Enum.MouseBehavior.Default
+    --     input.MouseIconEnabled = true
+    -- end
 end
 
 function library:ChangeThemeOption(option, color)
