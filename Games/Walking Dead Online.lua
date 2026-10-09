@@ -1,1 +1,1 @@
-hola
+return "hola"
