@@ -1258,7 +1258,8 @@ function library:ToggleUI(visible)
 
     if self.cursor then
         self.cursor.Visible = self.open
-        
+    -- else
+    --     Services.InputService.MouseIconEnabled
     end
 
     local input = Services.UserInputService
@@ -2697,35 +2698,35 @@ function library:Load(options)
         self.extension = extension
     end
 
-    local cursor = utility.create("Triangle", {
-        Thickness = 2,
-        Color = Color3.fromRGB(200, 150, 200),
-        ZIndex = 1000
-    })
+    -- local cursor = utility.create("Triangle", {
+    --     Thickness = 2,
+    --     Color = Color3.fromRGB(200, 150, 200),
+    --     ZIndex = 1000
+    -- })
 
-    self.cursor = cursor
+    -- self.cursor = cursor
 
-	if self.cursor then
-		Services.InputService.MouseIconEnabled = false
+	-- if self.cursor then
+	-- 	Services.InputService.MouseIconEnabled = false
 
-		utility.connect(Services.RunService.RenderStepped, function()
-			if self.open then
-				local mousepos = Services.InputService:GetMouseLocation()
-				cursor.PointA = mousepos
-				cursor.PointB = mousepos + Vector2.new(15, 12.5)
-				cursor.PointC = mousepos + Vector2.new(0, 20)
-				cursor.Filled = true
-			end
-		end)
-	end
+	-- 	utility.connect(Services.RunService.RenderStepped, function()
+	-- 		if self.open then
+	-- 			local mousepos = Services.InputService:GetMouseLocation()
+	-- 			cursor.PointA = mousepos
+	-- 			cursor.PointB = mousepos + Vector2.new(15, 12.5)
+	-- 			cursor.PointC = mousepos + Vector2.new(0, 20)
+	-- 			cursor.Filled = true
+	-- 		end
+	-- 	end)
+	-- end
 
 
     local holder = utility.create("Square", {
+        Visible = false,
         Transparency = 0,
         ZIndex = 100,
         Size = UDim2.new(0, sizeX, 0, 24),
         Position = utility.getcenter(sizeX, sizeY),
-        Visible = false
     })
 
     self.holder = holder
