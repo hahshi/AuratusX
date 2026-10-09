@@ -1239,7 +1239,6 @@ function library:GetConfigs(universal)
 end
 
 local savedBehavior
-local mouseBindingName = "LibraryFreeMouse"
 
 function library:ToggleUI(visible)
     Services.ContextActionService:UnbindAction("disablekeyboard")
@@ -1263,7 +1262,6 @@ function library:ToggleUI(visible)
     end
 
     local input = Services.UserInputService
-    local runService = Services.RunService
 
     if self.open then
         savedBehavior = input.MouseBehavior
