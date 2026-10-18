@@ -3266,7 +3266,7 @@ function library:Load(options)
                 function toggletypes:Keybind(options)
                     utility.table(options)
                     local default = options.default
-                    local blacklist = options.blacklist or {}
+                    local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete}
                     local flag = options.flag or utility.nextflag()
                     local mode = options.mode and options.mode:lower()
                     local callback = options.callback or function() end
