@@ -1322,7 +1322,7 @@ function library:SetTheme(theme)
 end
 
 function library:GetThemes()
-    local themes = {"Default", "Midnight"}
+    local themelist = {"Default", "Ocean"}
 
     local folderpath = string.format("%s//themes", self.folder)
 
@@ -1330,11 +1330,11 @@ function library:GetThemes()
         for _, theme in next, listfiles(folderpath) do
             local name = theme:gsub(folderpath .. "\\", "")
             name = name:gsub(".json", "")
-            table.insert(themes, name)
+            table.insert(themelist, name)
         end
     end
 
-    return themes
+    return themelist
 end
 
 function library:SaveCustomTheme(name)
@@ -2659,25 +2659,25 @@ function library:Watermark(str)
         watermark.Visible = open
     end
 
-    function watermarktypes:Set(str)
-        local size = utility.textlength(str, Drawing.Fonts.Plex, 13).X
-        watermark.Size = UDim2.new(0, size + 16, 0, 20)
+    function watermarktypes:Set(newstr)
+        local newsize = utility.textlength(newstr, Drawing.Fonts.Plex, 13).X
+        watermark.Size = UDim2.new(0, newsize + 16, 0, 20)
         watermark.Position = UDim2.new(0, 16, 0, 16)
-        text.Text = str
+        text.Text = newstr
     end
 
     return watermarktypes
 end
 
-function library:Load(options)
-    utility.table(options)
-    local name = options.name
-    local sizeX = options.sizex or 500
-    local sizeY = options.sizey or 550
-    local theme = options.theme or "Default"
-    local overrides = options.themeoverrides or {}
-    local folder = options.folder
-    local extension = options.extension
+function library:Load(loadoptions)
+    utility.table(loadoptions)
+    local windowname = loadoptions.name
+    local windowsizeX = loadoptions.sizex or 500
+    local windowsizeY = loadoptions.sizey or 550
+    local theme = loadoptions.theme or "Default"
+    local overrides = loadoptions.themeoverrides or {}
+    local folder = loadoptions.folder
+    local extension = loadoptions.extension
 
     self.currenttheme = theme
     self.theme = table.clone(themes[theme])
@@ -2717,32 +2717,32 @@ function library:Load(options)
 	-- end
 
 
-    local holder = utility.create("Square", {
+    local windowholder = utility.create("Square", {
         Visible = false,
         Transparency = 0,
         ZIndex = 100,
-        Size = UDim2.new(0, sizeX, 0, 24),
-        Position = utility.getcenter(sizeX, sizeY),
+        Size = UDim2.new(0, windowsizeX, 0, 24),
+        Position = utility.getcenter(windowsizeX, windowsizeY),
     })
 
-    self.holder = holder
+    self.holder = windowholder
 
     utility.create("Text", {
-        Text = name,
+        Text = windowname,
         Font = Drawing.Fonts.Plex,
         Size = 13,
         Position = UDim2.new(0, 6, 0, 4),
         Theme = "Text",
         ZIndex = 4,
         Outline = true,
-        Parent = holder,
+        Parent = windowholder,
     })
 
     local main = utility.create("Square", {
-        Size = UDim2.new(1, 0, 0, sizeY),
+        Size = UDim2.new(1, 0, 0, windowsizeY),
         Filled = true,
         Thickness = 0,
-        Parent = holder,
+        Parent = windowholder,
         ZIndex = 3,
         Theme = "Window Background"
     })
@@ -2757,13 +2757,13 @@ function library:Load(options)
         Services.ContextActionService:UnbindAction("disablemouse")
     end)
 
-    local outline = utility.outline(main, "Accent")
+    local mainoutline = utility.outline(main, "Accent")
 
-    utility.outline(outline, "Window Border")
+    utility.outline(mainoutline, "Window Border")
     
     local dragoutline = utility.create("Square", {
-        Size = UDim2.new(0, sizeX, 0, sizeY),
-        Position = utility.getcenter(sizeX, sizeY),
+        Size = UDim2.new(0, windowsizeX, 0, windowsizeY),
+        Position = utility.getcenter(windowsizeX, windowsizeY),
         Filled = false,
         Thickness = 1,
         Theme = "Accent",
@@ -2772,7 +2772,7 @@ function library:Load(options)
     })
 
     utility.create("Square", {
-        Size = UDim2.new(0, sizeX, 0, sizeY),
+        Size = UDim2.new(0, windowsizeX, 0, windowsizeY),
         Filled = false,
         Thickness = 2,
         Parent = dragoutline,
@@ -2780,7 +2780,7 @@ function library:Load(options)
         Theme = "Window Border",
     })
     
-    utility.dragify(holder, dragoutline)
+    utility.dragify(windowholder, dragoutline)
 
     local tabholder = utility.create("Square", {
         Size = UDim2.new(1, -16, 1, -52),
@@ -2806,7 +2806,7 @@ function library:Load(options)
 
     local windowtypes = utility.table({tabtoggles = {}, tabtoggleoutlines = {}, tabs = {}, tabtoggletitles = {}, count = 0}, true)
 
-    function windowtypes:Tab(name)
+    function windowtypes:Tab(tabname)
         local tabtoggle = utility.create("Square", {
             Filled = true,
             Thickness = 0,
@@ -2825,8 +2825,8 @@ function library:Load(options)
             v.Position = UDim2.new(1 / (#self.tabtoggles / (i - 1)), i == 1 and 0 or 2, 0, 0)
         end
 
-        local title = utility.create("Text", {
-            Text = name,
+        local tabtitle = utility.create("Text", {
+            Text = tabname,
             Font = Drawing.Fonts.Plex,
             Size = 13,
             Position = UDim2.new(0.5, 0, 0, 3),
@@ -2837,7 +2837,7 @@ function library:Load(options)
             Parent = tabtoggle,
         })
 
-        table.insert(self.tabtoggletitles, title)
+        table.insert(self.tabtoggletitles, tabtitle)
 
         local tab = utility.create("Square", {
             Transparency = 0,
@@ -2873,15 +2873,15 @@ function library:Load(options)
         column2:AddListLayout(12)
         column2:MakeScrollable()
 
-        local mouseover = false
+        local tabmouseover = false
 
         tabtoggle.MouseEnter:Connect(function()
-            mouseover = true
+            tabmouseover = true
             tabtoggle.Color = tab.Visible == true and utility.changecolor(library.theme["Tab Toggle Background"], 3) or utility.changecolor(library.theme["Tab Background"], 3)
         end)
 
         tabtoggle.MouseLeave:Connect(function()
-            mouseover = false
+            tabmouseover = false
             tabtoggle.Color = tab.Visible == true and library.theme["Tab Toggle Background"] or library.theme["Tab Background"]
         end)
 
@@ -2897,7 +2897,7 @@ function library:Load(options)
             end
 
             for _, obj in next, self.tabtoggletitles do
-                if obj ~= title then
+                if obj ~= tabtitle then
                     utility.changeobjecttheme(obj, "Disabled Text")
                 end 
             end
@@ -2909,17 +2909,17 @@ function library:Load(options)
             end
 
             tab.Visible = true
-            utility.changeobjecttheme(title, "Text")
+            utility.changeobjecttheme(tabtitle, "Text")
             utility.changeobjecttheme(tabtoggle, "Tab Toggle Background")
-            tabtoggle.Color = mouseover and utility.changecolor(library.theme["Tab Toggle Background"], 3) or utility.changecolor(library.theme["Tab Background"], 3)
+            tabtoggle.Color = tabmouseover and utility.changecolor(library.theme["Tab Toggle Background"], 3) or utility.changecolor(library.theme["Tab Background"], 3)
         end)
 
         local tabtypes = utility.table({}, true)
 
-        function tabtypes:Section(options)
-            utility.table(options)
-            local name = options.name
-            local side = options.side and options.side:lower() or "left"
+        function tabtypes:Section(sectionoptions)
+            utility.table(sectionoptions)
+            local sectionname = sectionoptions.name
+            local side = sectionoptions.side and sectionoptions.side:lower() or "left"
 
             local column = side == "left" and column1 or column2
 
@@ -2935,7 +2935,7 @@ function library:Load(options)
             utility.outline(section, "Section Border")
             
             utility.create("Text", {
-                Text = name,
+                Text = sectionname,
                 Font = Drawing.Fonts.Plex,
                 Size = 13,
                 Position = UDim2.new(0, 6, 0, 3),
@@ -3052,11 +3052,11 @@ function library:Load(options)
                 local separatortypes = utility.table({}, true)
 
                 function separatortypes:Set(str)
-                    local sizeX = utility.textlength(str, Drawing.Fonts.Plex, 13).X
-                    separatorcutoff.Size = UDim2.new(0, sizeX + 12, 0, 3)
-                    separatorcutoff.Position =  UDim2.new(0.5, (-sizeX / 2) - 7, 0.5, -1)
-                    separatorborder1.Position =  UDim2.new(0.5, (-sizeX / 2) - 7, 0.5, -1)
-                    separatorborder2.Position = UDim2.new(0.5, sizeX / 2 + 5, 0, -1)
+                    local newsizeX = utility.textlength(str, Drawing.Fonts.Plex, 13).X
+                    separatorcutoff.Size = UDim2.new(0, newsizeX + 12, 0, 3)
+                    separatorcutoff.Position =  UDim2.new(0.5, (-newsizeX / 2) - 7, 0.5, -1)
+                    separatorborder1.Position =  UDim2.new(0.5, (-newsizeX / 2) - 7, 0.5, -1)
+                    separatorborder2.Position = UDim2.new(0.5, newsizeX / 2 + 5, 0, -1)
 
                     text.Text = str
                 end
@@ -3069,7 +3069,7 @@ function library:Load(options)
             function sectiontypes:Button(options)
                 utility.table(options)
                 local name = options.name
-                local callback = options.callback or function() end
+                local callback = options.callback or function(...) end
 
                 local button = utility.create("Square", {
                     Filled = true,
@@ -3127,12 +3127,12 @@ function library:Load(options)
                 button.MouseButton1Click:Connect(callback)
             end
 
-            function sectiontypes:Toggle(options)
-                utility.table(options)
-                local name = options.name
-                local default = options.default or false
-                local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
+            function sectiontypes:Toggle(toggleoptions)
+                utility.table(toggleoptions)
+                local togglename = toggleoptions.name
+                local toggledefault = toggleoptions.default or false
+                local toggleflag = toggleoptions.flag or utility.nextflag()
+                local togglecallback = toggleoptions.callback or function(...) end
 
                 local holder = utility.create("Square", {
                     Transparency = 0,
@@ -3167,7 +3167,7 @@ function library:Load(options)
                 })
 
                 local title = utility.create("Text", {
-                    Text = name,
+                    Text = togglename,
                     Font = Drawing.Fonts.Plex,
                     Size = 13,
                     Position = UDim2.new(0, 17, 0, -2),
@@ -3184,10 +3184,10 @@ function library:Load(options)
 
                 local mouseover = false
 
-                library.flags[flag] = default
+                library.flags[toggleflag] = toggledefault
 
-                if not default then
-                    callback(default)
+                if not toggledefault then
+                    togglecallback(toggledefault)
                 end
 
                 icon.MouseEnter:Connect(function()
@@ -3227,8 +3227,8 @@ function library:Load(options)
                     utility.changeobjecttheme(title, toggletypes.State and "Accent" or "Disabled Text")
                     icon.Color = toggletypes.State and library.theme["Accent"] or (mouseover and utility.changecolor(library.theme["Object Background"], 3) or library.theme["Object Background"])
 
-                    library.flags[flag] = toggletypes.State
-                    callback(toggletypes.State)
+                    library.flags[toggleflag] = toggletypes.State
+                    togglecallback(toggletypes.State)
                 end
 
                 toggleclick.MouseButton1Click:Connect(setstate)
@@ -3241,9 +3241,9 @@ function library:Load(options)
                     end
                 end
 
-                set(default)
+                set(toggledefault)
 
-                flags[flag] = set
+                flags[toggleflag] = set
 
                 function toggletypes:Toggle(bool)
                     set(bool)
@@ -3256,7 +3256,7 @@ function library:Load(options)
 
                     utility.table(options)
                     local flag = options.flag or utility.nextflag()
-                    local callback = options.callback or function() end
+                    local callback = options.callback or function(...) end
                     local default = options.default or Color3.fromRGB(255, 255, 255)
                     local defaultalpha = options.defaultalpha or 1
 
@@ -3269,7 +3269,7 @@ function library:Load(options)
                     local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete}
                     local flag = options.flag or utility.nextflag()
                     local mode = options.mode and options.mode:lower()
-                    local callback = options.callback or function() end
+                    local callback = options.callback or function(...) end
 
                     local newcallback = function(key, fromsetting)
                         if not fromsetting then
@@ -3291,7 +3291,13 @@ function library:Load(options)
                     local float = options.float or 1
                     local default = options.default and math.clamp(options.default, min, max) or min
                     local flag = options.flag or utility.nextflag()
-                    local callback = options.callback or function() end
+                    local callback = function(...)
+                        if options.callback then
+                            options.callback(...)
+                        end
+
+                        togglecallback(toggletypes.State)
+                    end
 
                     holder.Size = UDim2.new(1, 0, 0, 28)
                     section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
@@ -3307,7 +3313,7 @@ function library:Load(options)
                     local scrollable = options.scrollable
                     local scrollingmax = options.scrollingmax or 10
                     local flag = options.flag or utility.nextflag()
-                    local callback = options.callback or function() end
+                    local callback = options.callback or function(...) end
     
                     if not max and type(default) == "table" then
                         default = nil
@@ -3349,7 +3355,7 @@ function library:Load(options)
                 local default = options.default or ""
                 local placeholder = options.placeholder or ""
                 local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
+                local callback = options.callback or function(...) end
 
                 local box = utility.create("Square", {
                     Filled = true,
@@ -3395,6 +3401,8 @@ function library:Load(options)
                 })
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
+
+                local mouseover = false
 
                 box.MouseEnter:Connect(function()
                     mouseover = true
@@ -3460,7 +3468,7 @@ function library:Load(options)
                 local float = options.float or 1
                 local default = options.default and math.clamp(options.default, min, max) or min
                 local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
+                local callback = options.callback or function(...) end
 
                 local holder = utility.create("Square", {
                     Transparency = 0,
@@ -3496,7 +3504,7 @@ function library:Load(options)
                 local scrollable = options.scrollable
                 local scrollingmax = options.scrollingmax or 10
                 local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
+                local callback = options.callback or function(...) end
 
                 if not max and type(default) == "table" then
                     default = nil
@@ -3555,7 +3563,7 @@ function library:Load(options)
                 local scrollable = options.scrollable
                 local scrollingmax = options.scrollingmax or 10
                 local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
+                local callback = options.callback or function(...) end
 
                 if not max and type(default) == "table" then
                     default = nil
@@ -3605,13 +3613,13 @@ function library:Load(options)
                 return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, true, section, sectioncontent)
             end
 
-            function sectiontypes:ColorPicker(options)
-                utility.table(options)
-                local name = options.name
-                local default = options.default or Color3.fromRGB(255, 255, 255)
-                local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
-                local defaultalpha = options.defaultalpha or 1
+            function sectiontypes:ColorPicker(pickeroptions)
+                utility.table(pickeroptions)
+                local pickername = pickeroptions.name
+                local pickerdefault = pickeroptions.default or Color3.fromRGB(255, 255, 255)
+                local pickerflag = pickeroptions.flag or utility.nextflag()
+                local pickercallback = pickeroptions.callback or function(...) end
+                local pickerdefaultalpha = pickeroptions.defaultalpha or 1
 
                 local holder = utility.create("Square", {
                     Transparency = 0,
@@ -3622,7 +3630,7 @@ function library:Load(options)
                 })
 
                 utility.create("Text", {
-                    Text = name,
+                    Text = pickername,
                     Font = Drawing.Fonts.Plex,
                     Size = 13,
                     Position = UDim2.new(0, 0, 0, 0),
@@ -3636,7 +3644,7 @@ function library:Load(options)
 
                 local colorpickers = 0
 
-                local colorpickertypes = library.createcolorpicker(default, defaultalpha, holder, colorpickers, flag, callback)
+                local colorpickertypes = library.createcolorpicker(pickerdefault, pickerdefaultalpha, holder, colorpickers, pickerflag, pickercallback)
 
                 function colorpickertypes:ColorPicker(options)
                     colorpickers = colorpickers + 1
@@ -3644,7 +3652,7 @@ function library:Load(options)
                     utility.table(options)
                     local default = options.default or Color3.fromRGB(255, 255, 255)
                     local flag = options.flag or utility.nextflag()
-                    local callback = options.callback or function() end
+                    local callback = options.callback or function(...) end
                     local defaultalpha = options.defaultalpha or 1
 
                     return library.createcolorpicker(default, defaultalpha, holder, colorpickers, flag, callback)
@@ -3659,7 +3667,7 @@ function library:Load(options)
                 local default = options.default
                 local blacklist = options.blacklist or {}
                 local flag = options.flag or utility.nextflag()
-                local callback = options.callback or function() end
+                local callback = options.callback or function(...) end
 
                 local holder = utility.create("Square", {
                     Transparency = 0,
