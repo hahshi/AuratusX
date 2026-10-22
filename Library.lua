@@ -917,7 +917,7 @@ function utility.getcenter(sizeX, sizeY)
     return UDim2.new(0.5, -(sizeX / 2), 0.5, -(sizeY / 2))
 end
 
-function utility.table(tbl, usemt)
+function utility.table(tbl, usemt, parent)
     tbl = tbl or {}
 
     local oldtbl = table.clone(tbl)
@@ -934,9 +934,30 @@ function utility.table(tbl, usemt)
     if usemt == true then
         setmetatable(tbl, {
             __index = function(t, k)
-                local v = rawget(t, k:lower())
-                if v ~= nil then return v end
-                return rawget(t, k)
+                local v
+                if type(k) == "string" then
+                    v = rawget(t, k:lower())
+                end
+                if v == nil then
+                    v = rawget(t, k)
+                end
+
+                if v ~= nil or parent == nil then
+                    return v
+                end
+
+                -- not found here, ask the parent
+                local pv = parent[k]
+                if type(pv) == "function" then
+                    return function(self, ...)
+                        if self == t then
+                            self = parent
+                        end
+                        return pv(self, ...)
+                    end
+                end
+
+                return pv
             end,
 
             __newindex = function(t, k, v)
@@ -951,6 +972,7 @@ function utility.table(tbl, usemt)
 
     return tbl
 end
+
 
 function utility.colortotable(color)
     local r, g, b = math.floor(color.R * 255),  math.floor(color.G * 255), math.floor(color.B * 255)
@@ -1486,7 +1508,7 @@ do
         end)
     end
 end
-function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent)
+function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent, parenttypes)
     local dropdown = utility.create("Square", {
         Filled = true,
         Visible = not islist,
@@ -1830,7 +1852,7 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
 
     set(default)
 
-    local dropdowntypes = utility.table({}, true)
+    local dropdowntypes = utility.table({}, true, parenttypes)
 
     function dropdowntypes:Set(option)
         set(option)
@@ -1926,7 +1948,7 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
     return dropdowntypes
 end
 
-function library.createslider(min, max, parent, text, default, float, flag, callback)
+function library.createslider(min, max, parent, text, default, float, flag, callback, parenttypes)
     local slider = utility.create("Square", {
         Filled = true,
         Thickness = 0,
@@ -2046,7 +2068,7 @@ function library.createslider(min, max, parent, text, default, float, flag, call
 
     flags[flag] = set
 
-    local slidertypes = utility.table({}, true)
+    local slidertypes = utility.table({}, true, parenttypes)
 
     function slidertypes:Set(value)
         set(value)
@@ -2057,7 +2079,7 @@ end
 
 local pickers = {}
 
-function library.createcolorpicker(default, defaultalpha, parent, count, flag, callback)
+function library.createcolorpicker(default, defaultalpha, parent, count, flag, callback, parenttypes)
     local icon = utility.create("Square", {
         Filled = true,
         Thickness = 0,
@@ -2448,7 +2470,7 @@ function library.createcolorpicker(default, defaultalpha, parent, count, flag, c
         end
     end)
 
-    local colorpickertypes = utility.table({}, true)
+    local colorpickertypes = utility.table({}, true, parenttypes)
 
     function colorpickertypes:Set(color)
         set(color)
@@ -2506,7 +2528,7 @@ local keys = {
     [Enum.UserInputType.MouseButton3] = "MOUSE-3"
 }
 
-function library.createkeybind(default, parent, blacklist, flag, callback, offset)
+function library.createkeybind(default, parent, blacklist, flag, callback, offset, parenttypes)
     if not offset then
         offset = 0
     end
@@ -2604,7 +2626,7 @@ function library.createkeybind(default, parent, blacklist, flag, callback, offse
         end
     end)
 
-    local keybindtypes = utility.table({}, true)
+    local keybindtypes = utility.table({}, true, parenttypes)
 
     function keybindtypes:Set(newkey)
         set(newkey)
@@ -3125,6 +3147,14 @@ function library:Load(loadoptions)
                 end)
 
                 button.MouseButton1Click:Connect(callback)
+
+                local buttontypes = utility.table({}, true, sectiontypes)
+                
+                function buttontypes:Fire()
+                    callback()
+                end
+                
+                return buttontypes
             end
 
             function sectiontypes:Toggle(toggleoptions)
@@ -3179,7 +3209,7 @@ function library:Load(loadoptions)
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                local toggletypes = utility.table({}, true)
+                local toggletypes = utility.table({}, true, sectiontypes)
                 toggletypes.State = false
 
                 local mouseover = false
@@ -3249,6 +3279,10 @@ function library:Load(loadoptions)
                     set(bool)
                 end
 
+                function toggletypes:Fire()
+                    togglecallback(toggletypes.State)
+                end
+
                 local colorpickers = -1
 
                 function toggletypes:ColorPicker(options)
@@ -3260,7 +3294,7 @@ function library:Load(loadoptions)
                     local default = options.default or Color3.fromRGB(255, 255, 255)
                     local defaultalpha = options.defaultalpha or 1
 
-                    return library.createcolorpicker(default, defaultalpha, holder, colorpickers, flag, callback)
+                    return library.createcolorpicker(default, defaultalpha, holder, colorpickers, flag, callback, toggletypes)
                 end
 
                 function toggletypes:Keybind(options)
@@ -3279,7 +3313,7 @@ function library:Load(loadoptions)
                         callback(key, fromsetting)
                     end
 
-                    return library.createkeybind(default, holder, blacklist, flag, mode == "toggle" and newcallback or callback, -2)
+                    return library.createkeybind(default, holder, blacklist, flag, mode == "toggle" and newcallback or callback, -2, toggletypes)
                 end
 
                 function toggletypes:Slider(options)
@@ -3302,7 +3336,7 @@ function library:Load(loadoptions)
                     holder.Size = UDim2.new(1, 0, 0, 28)
                     section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                    return library.createslider(min, max, holder, text, default, float, flag, callback)
+                    return library.createslider(min, max, holder, text, default, float, flag, callback, toggletypes)
                 end
 
                 function toggletypes:Dropdown(options)
@@ -3344,7 +3378,7 @@ function library:Load(loadoptions)
                     holder.Size = UDim2.new(1, 0, 0, 32)
                     section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                    return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax)
+                    return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, nil, nil, nil, toggletypes)
                 end
 
                 return toggletypes
@@ -3492,7 +3526,7 @@ function library:Load(loadoptions)
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                return library.createslider(min, max, holder, text, default, float, flag, callback)
+                return library.createslider(min, max, holder, text, default, float, flag, callback, sectiontypes)
             end
 
             function sectiontypes:Dropdown(options)
@@ -3551,7 +3585,7 @@ function library:Load(loadoptions)
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax)
+                return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, nil, nil, nil, sectiontypes)
             end
 
             function sectiontypes:List(options)
@@ -3610,7 +3644,7 @@ function library:Load(loadoptions)
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, true, section, sectioncontent)
+                return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, true, section, sectioncontent, sectiontypes)
             end
 
             function sectiontypes:ColorPicker(pickeroptions)
@@ -3644,7 +3678,7 @@ function library:Load(loadoptions)
 
                 local colorpickers = 0
 
-                local colorpickertypes = library.createcolorpicker(pickerdefault, pickerdefaultalpha, holder, colorpickers, pickerflag, pickercallback)
+                local colorpickertypes = library.createcolorpicker(pickerdefault, pickerdefaultalpha, holder, colorpickers, pickerflag, pickercallback, sectiontypes)
 
                 function colorpickertypes:ColorPicker(options)
                     colorpickers = colorpickers + 1
@@ -3655,7 +3689,7 @@ function library:Load(loadoptions)
                     local callback = options.callback or function(...) end
                     local defaultalpha = options.defaultalpha or 1
 
-                    return library.createcolorpicker(default, defaultalpha, holder, colorpickers, flag, callback)
+                    return library.createcolorpicker(default, defaultalpha, holder, colorpickers, flag, callback, colorpickertypes)
                 end
 
                 return colorpickertypes
@@ -3689,7 +3723,7 @@ function library:Load(loadoptions)
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
-                return library.createkeybind(default, holder, blacklist, flag, callback, -1)
+                return library.createkeybind(default, holder, blacklist, flag, callback, -1, sectiontypes)
             end
 
             return sectiontypes
