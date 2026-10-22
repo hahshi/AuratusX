@@ -3292,7 +3292,6 @@ function library:Load(loadoptions)
                     local default = options.default and math.clamp(options.default, min, max) or min
                     local flag = options.flag or utility.nextflag()
                     local callback = function(...)
-                        print('got callback', ...)
                         if options.callback then
                             options.callback(...)
                         end
