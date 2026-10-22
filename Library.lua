@@ -2528,6 +2528,8 @@ local keys = {
     [Enum.UserInputType.MouseButton3] = "MOUSE-3"
 }
 
+local globalbinding = false
+
 function library.createkeybind(default, parent, blacklist, flag, callback, offset, parenttypes)
     if not offset then
         offset = 0
@@ -2610,18 +2612,21 @@ function library.createkeybind(default, parent, blacklist, flag, callback, offse
             keytext.Text = "..."
             utility.changeobjecttheme(keytext, "Disabled Text")
             keytext.Position = UDim2.new(1, -sizeX, 0, 0)
+
+            globalbinding = true
             
             binding = utility.connect(Services.UserInputService.InputBegan, function(input)
                 set(input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType)
                 utility.disconnect(binding)
                 task.wait()
                 binding = nil
+                globalbinding = false
             end)
         end
     end)
 
     utility.connect(Services.UserInputService.InputBegan, function(input)
-        if not binding and (input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == key) or input.UserInputType == key then
+        if not binding and not globalbinding and (input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == key) or input.UserInputType == key then
             callback(key)
         end
     end)
@@ -3300,7 +3305,7 @@ function library:Load(loadoptions)
                 function toggletypes:Keybind(options)
                     utility.table(options)
                     local default = options.default
-                    local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete}
+                    local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete, Enum.KeyCode.None}
                     local flag = options.flag or utility.nextflag()
                     local mode = options.mode and options.mode:lower()
                     local callback = options.callback or function(...) end
@@ -3699,7 +3704,7 @@ function library:Load(loadoptions)
                 utility.table(options)
                 local name = options.name
                 local default = options.default
-                local blacklist = options.blacklist or {}
+                local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete, Enum.KeyCode.None}
                 local flag = options.flag or utility.nextflag()
                 local callback = options.callback or function(...) end
 
