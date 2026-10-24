@@ -3592,6 +3592,67 @@ function library:Load(loadoptions)
 
                     return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, nil, nil, nil, toggletypes)
                 end
+                
+                function toggletypes:List(options)
+                    utility.table(options)
+                
+                    local content = type(options.content) == "table"
+                        and options.content or {}
+                
+                    local max = options.max and options.max > 1
+                        and options.max or nil
+                
+                    local default = options.default
+                    local scrollable = options.scrollable
+                    local scrollingmax = options.scrollingmax or 10
+                    local flag = options.flag or utility.nextflag()
+                    local callback = options.callback or function(...) end
+                
+                    if max then
+                        local selected = {}
+                
+                        if type(default) == "table" then
+                            for _, option in ipairs(default) do
+                                if table.find(content, option)
+                                    and not table.find(selected, option) then
+                                    table.insert(selected, option)
+                
+                                    if #selected >= max then
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                
+                        default = selected
+                    elseif type(default) == "table"
+                        or not table.find(content, default) then
+                        default = nil
+                    end
+                
+                    holder.Size = UDim2.new(1, 0, 0, 32)
+                
+                    section.Size = UDim2.new(
+                        1, 0,
+                        0, sectioncontent.AbsoluteContentSize + 28
+                    )
+                
+                    return library.createdropdown(
+                        holder,
+                        content,
+                        flag,
+                        callback,
+                        default,
+                        max,
+                        scrollable,
+                        scrollingmax,
+                        true,
+                        section,
+                        sectioncontent,
+                        toggletypes
+                    )
+                end
+
 
                 return toggletypes
             end
