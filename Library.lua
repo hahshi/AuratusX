@@ -1116,27 +1116,16 @@ end
 
 function utility.create(class, properties)
     local obj = drawing:new(class)
-    obj.Visible = false
 
-    for prop, value in next, properties do
+    for prop, v in next, properties do
         if prop == "Theme" then
-            themeobjects[obj] = value
-            obj.Color = library.theme[value]
-        elseif prop ~= "Parent" and prop ~= "Visible" then
-            obj[prop] = value
+            themeobjects[obj] = v
+            obj.Color = library.theme[v]
+        else
+            obj[prop] = v
         end
     end
-
-    if properties.Parent ~= nil then
-        obj.Parent = properties.Parent
-    end
-
-    local visible = properties.Visible
-    if visible == nil then
-        visible = true
-    end
-
-    obj.Visible = visible
+    
     return obj
 end
 
@@ -2807,6 +2796,7 @@ function library:Load(loadoptions)
         Theme = "Accent",
         ZIndex = 1,
         Visible = false,
+        Parent = windowholder,
     })
 
     utility.create("Square", {
