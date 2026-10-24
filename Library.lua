@@ -1116,16 +1116,27 @@ end
 
 function utility.create(class, properties)
     local obj = drawing:new(class)
+    obj.Visible = false
 
-    for prop, v in next, properties do
+    for prop, value in next, properties do
         if prop == "Theme" then
-            themeobjects[obj] = v
-            obj.Color = library.theme[v]
-        else
-            obj[prop] = v
+            themeobjects[obj] = value
+            obj.Color = library.theme[value]
+        elseif prop ~= "Parent" and prop ~= "Visible" then
+            obj[prop] = value
         end
     end
-    
+
+    if properties.Parent ~= nil then
+        obj.Parent = properties.Parent
+    end
+
+    local visible = properties.Visible
+    if visible == nil then
+        visible = true
+    end
+
+    obj.Visible = visible
     return obj
 end
 
@@ -2877,7 +2888,6 @@ function library:Load(loadoptions)
         table.insert(self.tabs, tab)
 
         task.spawn(function()
-            task.wait()
             tab.Visible = tab.Visible
         end)
         
