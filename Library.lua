@@ -1984,7 +1984,8 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
     if islist and scrollable then
         library.createlistscrollbar(contentframe, contentholder)
     end
-    
+
+
     local function set(option)
         if max then
             option = type(option) == "table" and option or {}
