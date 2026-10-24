@@ -2796,7 +2796,6 @@ function library:Load(loadoptions)
         Theme = "Accent",
         ZIndex = 1,
         Visible = false,
-        Parent = windowholder,
     })
 
     utility.create("Square", {
