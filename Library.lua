@@ -733,8 +733,15 @@ do
                         end
 
                         if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            obj.Visible = istouching(obj.Position, v, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false
-                            changechildrenvis(self, istouching(obj.Position, v, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false)
+                            local parent = mtobjs[customproperties.Parent]
+                        
+                            local visible = parent.Visible
+                                and objvisibles[obj]
+                                and istouching(obj.Position, v, parent.Position, parent.Size)
+                                or false
+                        
+                            obj.Visible = visible
+                            changechildrenvis(self, visible)
                         end
                     else
                         if customproperties.Parent and listobjs[customproperties.Parent] then
@@ -765,10 +772,16 @@ do
                                 object.Visible = istouching(object.Position, object.Size, obj.Position, v) and objvisibles[object] or false
                             end
                         end
-
                         if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            obj.Visible = istouching(obj.Position, v, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false
-                            changechildrenvis(self, istouching(obj.Position, v, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false)
+                            local parent = mtobjs[customproperties.Parent]
+                        
+                            local visible = parent.Visible
+                                and objvisibles[obj]
+                                and istouching(obj.Position, v, parent.Position, parent.Size)
+                                or false
+                        
+                            obj.Visible = visible
+                            changechildrenvis(self, visible)
                         end
                     end
 
@@ -839,12 +852,9 @@ do
 
                         changechildrenpos(self, newpos)
                     end
-
-                    if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                        obj.Visible = istouching(obj.Position, obj.Size, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                    end
                     
                     customproperties.Parent = v
+                    self.Visible = objvisibles[obj]
                     return
                 end
 
