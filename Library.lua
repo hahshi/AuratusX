@@ -3784,16 +3784,19 @@ function library:Load(loadoptions)
                     Parent = sectioncontent
                 })
 
-                utility.create("Text", {
-                    Text = name,
-                    Font = Drawing.Fonts.Plex,
-                    Size = 13,
-                    Position = UDim2.new(0, 0, 0, -2),
-                    Theme = "Text",
-                    ZIndex = 7,
-                    Outline = true,
-                    Parent = holder
-                })
+                if name then
+                    utility.create("Text", {
+                        Text = name,
+                        Font = Drawing.Fonts.Plex,
+                        Size = 13,
+                        Position = UDim2.new(0, 0, 0, -2),
+                        Theme = "Text",
+                        ZIndex = 7,
+                        Outline = true,
+                        Parent = holder
+                    })    
+                end
+
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
@@ -3843,16 +3846,19 @@ function library:Load(loadoptions)
                     Parent = sectioncontent
                 })
 
-                utility.create("Text", {
-                    Text = name,
-                    Font = Drawing.Fonts.Plex,
-                    Size = 13,
-                    Position = UDim2.new(0, 0, 0, -2),
-                    Theme = "Text",
-                    ZIndex = 7,
-                    Outline = true,
-                    Parent = holder
-                })
+                if name then
+                    utility.create("Text", {
+                        Text = name,
+                        Font = Drawing.Fonts.Plex,
+                        Size = 13,
+                        Position = UDim2.new(0, 0, 0, -2),
+                        Theme = "Text",
+                        ZIndex = 7,
+                        Outline = true,
+                        Parent = holder
+                    })
+                end
+
 
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
 
