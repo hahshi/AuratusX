@@ -373,6 +373,22 @@ do
                         return docontinue
                     end
 
+                    rawset(self, "Scroll", function(_, direction)
+                        if direction == 0 then
+                            return false
+                        end
+
+                        return scroll(direction > 0 and 1 or -1)
+                    end)
+
+                    rawset(self, "GetScrollState", function()
+                        local viewport = math.max(0, mtobjs[self].Size.Y)
+                        local total = math.max(0, listcontents[self] or 0)
+                        local offset = math.max(0, -(scrollpositions[self] or 0))
+
+                        return offset, math.max(0, total - viewport), viewport, total
+                    end)
+
                     refreshscrolling = function()
                         repeat
                         until
@@ -852,7 +868,7 @@ do
 
                         changechildrenpos(self, newpos)
                     end
-                    
+
                     customproperties.Parent = v
                     self.Visible = objvisibles[obj]
                     return
@@ -1518,6 +1534,184 @@ do
         end)
     end
 end
+function library.createlistscrollbar(contentframe, contentholder)
+    local width = 12
+    local gap = 3
+
+    -- Reserve space so options do not overlap the scrollbar.
+    contentholder.Size = UDim2.new(1, -(6 + width + gap), 1, -6)
+
+    -- Parent to contentframe, outside the scrolling list layout.
+    local rail = utility.create("Square", {
+        Filled = true,
+        Thickness = 0,
+        Theme = "Object Border",
+        Size = UDim2.new(0, width, 1, -6),
+        Position = UDim2.new(1, -(width + 3), 0, 3),
+        ZIndex = 14,
+        Parent = contentframe
+    })
+
+    local function createarrow(text, bottom)
+        local button = utility.create("Square", {
+            Filled = true,
+            Thickness = 0,
+            Theme = "Object Background",
+            Size = UDim2.new(1, -2, 0, 12),
+            Position = bottom
+                and UDim2.new(0, 1, 1, -12)
+                or UDim2.new(0, 1, 0, 0),
+            ZIndex = 15,
+            Parent = rail
+        })
+
+        local label = utility.create("Text", {
+            Text = text,
+            Font = Drawing.Fonts.Plex,
+            Size = 12,
+            Center = true,
+            Outline = true,
+            Theme = "Text",
+            Position = UDim2.new(0.5, 0, 0.5, -6),
+            ZIndex = 16,
+            Parent = button
+        })
+
+        return button, label
+    end
+
+    local up, uptext = createarrow("^", false)
+    local down, downtext = createarrow("v", true)
+
+    local thumb = utility.create("Square", {
+        Filled = true,
+        Thickness = 0,
+        Theme = "Accent",
+        Size = UDim2.new(1, -4, 0, 8),
+        Position = UDim2.new(0, 2, 0, 13),
+        ZIndex = 15,
+        Parent = rail
+    })
+
+    local previousOffset
+    local previousMaximum
+    local previousHeight
+    local previousTotal
+
+    local function update()
+        if not contentframe.exists
+            or not contentholder.exists
+            or not rail.exists then
+            return
+        end
+
+        local offset, maximum, height, total =
+            contentholder:GetScrollState()
+
+        if offset == previousOffset
+            and maximum == previousMaximum
+            and height == previousHeight
+            and total == previousTotal then
+            return
+        end
+
+        previousOffset = offset
+        previousMaximum = maximum
+        previousHeight = height
+        previousTotal = total
+
+        rail.Visible = height > 0
+
+        -- Keep both arrows inside short lists too.
+        local buttonHeight = math.min(
+            12,
+            math.max(0, math.floor((height - 3) / 2))
+        )
+
+        up.Size = UDim2.new(1, -2, 0, buttonHeight)
+        down.Size = UDim2.new(1, -2, 0, buttonHeight)
+        down.Position = UDim2.new(0, 1, 1, -buttonHeight)
+
+        for _, label in ipairs({uptext, downtext}) do
+            label.Size = math.max(1, buttonHeight)
+            label.Position = UDim2.new(
+                0.5, 0,
+                0.5, -math.floor(label.TextBounds.Y / 2)
+            )
+        end
+
+        local trackTop = buttonHeight + 1
+        local trackHeight = math.max(
+            0,
+            height - buttonHeight * 2 - 2
+        )
+
+        local thumbHeight = trackHeight
+
+        if total > 0 and maximum > 0 then
+            thumbHeight = math.clamp(
+                math.floor(trackHeight * height / total),
+                math.min(8, trackHeight),
+                trackHeight
+            )
+        end
+
+        local progress = maximum > 0
+            and math.clamp(offset / maximum, 0, 1)
+            or 0
+
+        thumb.Visible = trackHeight > 0
+        thumb.Size = UDim2.new(1, -4, 0, thumbHeight)
+        thumb.Position = UDim2.new(
+            0, 2,
+            0, trackTop + math.floor(
+                (trackHeight - thumbHeight) * progress
+            )
+        )
+
+        utility.changeobjecttheme(
+            uptext,
+            offset > 0 and "Text" or "Disabled Text"
+        )
+
+        utility.changeobjecttheme(
+            downtext,
+            offset < maximum and "Text" or "Disabled Text"
+        )
+    end
+
+    up.MouseButton1Click:Connect(function()
+        contentholder:Scroll(-1)
+        update()
+    end)
+
+    down.MouseButton1Click:Connect(function()
+        contentholder:Scroll(1)
+        update()
+    end)
+
+    update()
+
+    -- Follow mouse-wheel scrolling, content changes, and resizing.
+    local connection
+    connection = utility.connect(
+        Services.RunService.RenderStepped,
+        function()
+            if not contentframe.exists
+                or not contentholder.exists
+                or not rail.exists then
+                utility.disconnect(connection)
+                return
+            end
+
+            update()
+        end
+    )
+
+    return rail
+end
+
+
 function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent, parenttypes)
     local dropdown = utility.create("Square", {
         Filled = true,
@@ -1787,7 +1981,10 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
     end
 
     createoptions(content)
-
+    if islist and scrollable then
+        library.createlistscrollbar(contentframe, contentholder)
+    end
+    
     local function set(option)
         if max then
             option = type(option) == "table" and option or {}
