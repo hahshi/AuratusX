@@ -12,252 +12,61 @@ local Services = setmetatable({}, {
 local drawing = {}
 
 do
+    local UIS = Services.UserInputService
+    local RunService = Services.RunService
+
+    -- Signals only allocate a BindableEvent when accessed.
     local Signal = {}
     Signal.__index = Signal
     Signal.ClassName = "Signal"
 
     function Signal.isSignal(value)
-        return type(value) == "table" and getmetatable(value) == Signal
+        return type(value) == "table"
+            and getmetatable(value) == Signal
     end
 
     function Signal.new()
-        local self = setmetatable({}, Signal)
-
-        self._bindableEvent = Instance.new("BindableEvent")
-        self._argMap = {}
-        self._source = ""
-
-        self._bindableEvent.Event:Connect(function(key)
-            self._argMap[key] = nil
-
-            if (not self._bindableEvent) and (not next(self._argMap)) then
-                self._argMap = nil
-            end
-        end)
-
-        return self
+        return setmetatable({
+            _event = Instance.new("BindableEvent")
+        }, Signal)
     end
 
     function Signal:Fire(...)
-        if not self._bindableEvent then
-            warn(("Signal is already destroyed. %s"):format(self._source))
-            return
+        if self._event then
+            self._event:Fire(table.pack(...))
         end
-
-        local args = table.pack(...)
-
-        local key = Services.HttpService:GenerateGUID(false)
-        self._argMap[key] = args
-
-        self._bindableEvent:Fire(key)
     end
 
-    function Signal:Connect(handler)
-        if not (type(handler) == "function") then
-            error(("connect(%s)"):format(typeof(handler)), 2)
-        end
+    function Signal:Connect(callback)
+        assert(type(callback) == "function", "Expected a function")
+        assert(self._event, "Signal has been destroyed")
 
-        return self._bindableEvent.Event:Connect(function(key)
-            local args = self._argMap[key]
-            if args then
-                handler(table.unpack(args, 1, args.n))
-            else
-                error("Missing arg data, probably due to reentrance.")
-            end
+        return self._event.Event:Connect(function(arguments)
+            callback(table.unpack(arguments, 1, arguments.n))
         end)
     end
 
     function Signal:Wait()
-        local key = self._bindableEvent.Event:Wait()
-        local args = self._argMap[key]
-        if args then
-            return table.unpack(args, 1, args.n)
-        else
-            error("Missing arg data, probably due to reentrance.")
-        end
+        assert(self._event, "Signal has been destroyed")
+
+        local arguments = self._event.Event:Wait()
+        return table.unpack(arguments, 1, arguments.n)
     end
 
     function Signal:Destroy()
-        if self._bindableEvent then
-
-            self._bindableEvent:Destroy()
-            self._bindableEvent = nil
-        end
-
-        setmetatable(self, nil)
-    end
-
-    local function ismouseover(obj)
-        local posX, posY = obj.Position.X, obj.Position.Y
-        local sizeX, sizeY = posX + obj.Size.X, posY + obj.Size.Y
-        local mousepos = Services.UserInputService:GetMouseLocation()
-
-        return mousepos.X >= posX and mousepos.Y >= posY and mousepos.X <= sizeX and mousepos.Y <= sizeY
-    end
-
-    local function udim2tovector2(udim2, vec2)
-        local xscalevector2 = vec2.X * udim2.X.Scale
-        local yscalevector2 = vec2.Y * udim2.Y.Scale
-
-        return Vector2.new(xscalevector2 + udim2.X.Offset, yscalevector2 + udim2.Y.Offset)
-    end
-
-    local function istouching(pos1, size1, pos2, size2)
-        local top = pos2.Y - pos1.Y
-        local bottom = pos2.Y + size2.Y - (pos1.Y + size1.Y)
-        local left = pos2.X - pos1.X
-        local right = pos2.X + size2.X - (pos1.X + size1.X)
-
-        local touching = true
-
-        if top > 0 then
-            touching = false
-        elseif bottom < 0 then
-            touching = false
-        elseif left > 0 then
-            touching = false
-        elseif right < 0 then
-            touching = false
-        end
-
-        return touching
-    end
-
-    local objchildren = {}
-    local objmts = {}
-    local objvisibles = {}
-    local mtobjs = {}
-    local udim2posobjs = {}
-    local udim2sizeobjs = {}
-    local objpositions = {}
-    local listobjs = {}
-    local listcontents = {}
-    local listchildren = {}
-    local listadds = {}
-    local objpaddings = {}
-    local scrollobjs = {}
-    local listindexes = {}
-    local custompropertysets = {}
-    local custompropertygets = {}
-    local objmtchildren = {}
-    local scrollpositions = {}
-    local childrenposupdates = {}
-    local childrenvisupdates = {}
-    local squares = {}
-    local objsignals = {}
-    local objexists = {}
-
-    local function mouseoverhighersquare(obj)
-        for _, square in next, squares do
-            if square.Visible == true and square.ZIndex > obj.ZIndex then
-                if ismouseover(square) then
-                    return true
-                end
-            end
+        if self._event then
+            self._event:Destroy()
+            self._event = nil
         end
     end
 
-    Services.UserInputService.InputEnded:Connect(function(input, gpe)
-        for obj, signals in next, objsignals do
-            if objexists[obj] then
-                if signals.inputbegan[input] then
-                    signals.inputbegan[input] = false
-
-                    if signals.InputEnded then
-                        signals.InputEnded:Fire(input, gpe)
-                    end
-                end
-
-                if obj.Visible then
-                    if ismouseover(obj) then
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 and not mouseoverhighersquare(obj) then
-                            if signals.MouseButton1Up then
-                                signals.MouseButton1Up:Fire()
-                            end
-
-                            if signals.mouse1down and signals.MouseButton1Click then
-                                signals.mouse1down = false
-                                signals.MouseButton1Click:Fire()
-                            end
-                        end
-
-                        if input.UserInputType == Enum.UserInputType.MouseButton2 and not mouseoverhighersquare(obj) then
-                            if signals.MouseButton2Up then
-                                signals.MouseButton2Up:Fire()
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    Services.UserInputService.InputChanged:Connect(function(input, gpe)
-        for obj, signals in next, objsignals do
-            if objexists[obj] and obj.Visible and (signals.MouseEnter or signals.InputChanged or signals.MouseLeave) then
-                if ismouseover(obj) then
-                    if not signals.mouseentered then
-                        signals.mouseentered = true
-
-                        if signals.MouseEnter then
-                            signals.MouseEnter:Fire(input.Position)
-                        end
-
-                        if signals.MouseMoved then
-                            signals.MouseMoved:Fire(input.Position)
-                        end
-                    end
-
-                    if signals.InputChanged then
-                        signals.InputChanged:Fire(input, gpe)
-                    end
-                elseif signals.mouseentered then
-                    signals.mouseentered = false
-
-                    if signals.MouseLeave then
-                        signals.MouseLeave:Fire(input.Position)
-                    end
-                end
-            end
-        end
-    end)
-
-    Services.UserInputService.InputBegan:Connect(function(input, gpe)
-        for obj, signals in next, objsignals do
-            if objexists[obj] then
-                if obj.Visible then
-                    if ismouseover(obj) and not mouseoverhighersquare(obj) then 
-                        signals.inputbegan[input] = true
-
-                        if signals.InputBegan then
-                            signals.InputBegan:Fire(input, gpe)
-                        end
-
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 and (not mouseoverhighersquare(obj) or obj.Transparency == 0) then
-                            signals.mouse1down = true
-
-                            if signals.MouseButton1Down then
-                                signals.MouseButton1Down:Fire()
-                            end
-                        end
-
-                        if input.UserInputType == Enum.UserInputType.MouseButton2 and (not mouseoverhighersquare(obj) or obj.Transparency == 0) then
-                            if signals.MouseButton2Down then
-                                signals.MouseButton2Down:Fire()
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    -- Place this inside the existing drawing API's do ... end block,
-    -- replacing the previous drawing:new() function.
-
-    local drawingBackend = {
+    -- Each wrapper has one state record.
+    -- Additional sets contain only objects relevant to their operation.
+    local B = {
         states = {},
         pending = {},
+        squares = {},
+        interactive = {},
         scrollables = {},
         methods = {},
 
@@ -277,8 +86,6 @@ do
         }
     }
 
-    local B = drawingBackend
-
     function B.viewport()
         local camera = workspace.CurrentCamera
 
@@ -289,7 +96,10 @@ do
 
     function B.vector(value, reference)
         if typeof(value) == "UDim2" then
-            return udim2tovector2(value, reference)
+            return Vector2.new(
+                reference.X * value.X.Scale + value.X.Offset,
+                reference.Y * value.Y.Scale + value.Y.Offset
+            )
         end
 
         return value
@@ -356,7 +166,7 @@ do
             and point.Y < rect.bottom
     end
 
-    -- Avoid sending unchanged properties to the native drawing object.
+    -- Cache native writes, including the rendered/cropped geometry.
     function B.write(state, key, value)
         if state.written[key] == value then
             return false
@@ -368,11 +178,11 @@ do
         return true
     end
 
-    -- Mark the path to the root without recalculating the tree.
+    -- Queue work without immediately traversing the window.
     function B.mark(state)
         local current = state
 
-        while current do
+        while current and not current.dead do
             current.dirty = true
 
             local parent = current.parent
@@ -387,8 +197,7 @@ do
         end
     end
 
-    -- Preserve the valid prefix of a list.
-    -- Appending one fixed-height option only measures that new option.
+    -- Keep the already-measured prefix when a list changes.
     function B.invalidateList(state, index)
         if not state or not state.list then
             return
@@ -413,7 +222,6 @@ do
     end
 
     function B.size(state)
-        -- Text and point shapes do not depend on their parent's size.
         if not state.rectangular and not state.sizeDirty then
             return state.absoluteSize
         end
@@ -456,8 +264,7 @@ do
         if size.Y ~= previous.Y then
             B.invalidateList(parent, state.index)
 
-            -- A changing viewport height only invalidates row measurements
-            -- when some rows actually use a relative height.
+            -- Fixed-height rows remain valid when their viewport grows.
             if state.list and state.relativeHeightCount > 0 then
                 state.validCount = 0
                 state.childrenDirty = true
@@ -467,6 +274,8 @@ do
         return size
     end
 
+    -- This getter updates measurements without rendering.
+    -- Appending a fixed-height row normally measures just the new row.
     function B.content(state)
         B.size(state)
 
@@ -508,7 +317,11 @@ do
         state.maximum = maximum
 
         if state.scrollable then
-            state.offset = math.clamp(state.offset, 0, maximum)
+            state.offset = math.clamp(
+                state.offset,
+                0,
+                maximum
+            )
         else
             state.offset = 0
         end
@@ -516,7 +329,7 @@ do
         return state.offset, maximum, viewport, total
     end
 
-    -- Logical positions can be read immediately without rendering the window.
+    -- Logical coordinates stay independent of cropped native drawings.
     function B.position(state)
         local parent = state.parent
             and B.states[state.parent]
@@ -539,7 +352,10 @@ do
                     + B.vector(state.position, parentSize)
             end
         else
-            position = B.vector(state.position, B.viewport())
+            position = B.vector(
+                state.position,
+                B.viewport()
+            )
         end
 
         return Vector2.new(
@@ -577,6 +393,8 @@ do
                 B.write(state, "Position", position)
                 B.write(state, "Size", size)
 
+                -- Images cannot be texture-cropped through this API.
+                -- Unfilled squares must not acquire artificial borders.
                 B.write(
                     state,
                     "Visible",
@@ -637,11 +455,14 @@ do
             return
         end
 
-        -- Point-based drawings retain absolute native coordinates.
+        -- Point-based shapes retain absolute native coordinates.
         local points
 
         if state.shape == "Line" then
-            points = {object.From, object.To}
+            points = {
+                object.From,
+                object.To
+            }
         elseif state.shape == "Triangle" then
             points = {
                 object.PointA,
@@ -665,10 +486,25 @@ do
         }
 
         for _, point in ipairs(points) do
-            pointBounds.left = math.min(pointBounds.left, point.X)
-            pointBounds.top = math.min(pointBounds.top, point.Y)
-            pointBounds.right = math.max(pointBounds.right, point.X)
-            pointBounds.bottom = math.max(pointBounds.bottom, point.Y)
+            pointBounds.left = math.min(
+                pointBounds.left,
+                point.X
+            )
+
+            pointBounds.top = math.min(
+                pointBounds.top,
+                point.Y
+            )
+
+            pointBounds.right = math.max(
+                pointBounds.right,
+                point.X
+            )
+
+            pointBounds.bottom = math.max(
+                pointBounds.bottom,
+                point.Y
+            )
         end
 
         B.write(
@@ -693,7 +529,10 @@ do
 
         local size = B.size(state)
         local visible = parentVisible and state.visible
-        local layer = math.max(parentLayer, state.object.ZIndex)
+        local layer = math.max(
+            parentLayer,
+            state.object.ZIndex
+        )
 
         local changed = not state.laidOut
             or state.contextDirty
@@ -727,7 +566,13 @@ do
                 state.childClip = clip
             end
 
-            B.paint(state, position, size, clip, bounds)
+            B.paint(
+                state,
+                position,
+                size,
+                clip,
+                bounds
+            )
         end
 
         for _, childWrapper in ipairs(state.children) do
@@ -751,6 +596,8 @@ do
                     math.floor(childPosition.Y)
                 )
 
+                -- Native clipping of a parent does not suppress its
+                -- descendants. Only logical visibility propagates.
                 B.layout(
                     child,
                     childPosition,
@@ -784,7 +631,10 @@ do
         B.pending = {}
 
         for state in pairs(pending) do
-            if B.states[state.wrapper] == state and not state.parent then
+            if not state.dead
+                and B.states[state.wrapper] == state
+                and not state.parent then
+
                 B.layout(
                     state,
                     B.position(state),
@@ -813,7 +663,8 @@ do
         table.remove(parent.children, index)
 
         for childIndex = index, #parent.children do
-            B.states[parent.children[childIndex]].index = childIndex
+            B.states[parent.children[childIndex]].index =
+                childIndex
         end
 
         if state.scaledHeight then
@@ -830,7 +681,8 @@ do
 
     function B.setParent(state, parentWrapper)
         assert(
-            parentWrapper == nil or B.states[parentWrapper] ~= nil,
+            parentWrapper == nil
+                or B.states[parentWrapper] ~= nil,
             "Parent must be another drawing wrapper"
         )
 
@@ -873,14 +725,23 @@ do
     end
 
     function B.destroy(state)
+        if state.dead then
+            return
+        end
+
+        state.dead = true
         rawset(state.wrapper, "exists", false)
 
-        objexists[state.object] = nil
-        objsignals[state.object] = nil
+        B.squares[state] = nil
+        B.interactive[state] = nil
         B.scrollables[state] = nil
 
         while #state.children > 0 do
-            B.destroy(B.states[state.children[#state.children]])
+            local child = B.states[
+                state.children[#state.children]
+            ]
+
+            B.destroy(child)
         end
 
         B.detach(state)
@@ -888,19 +749,6 @@ do
         for _, signal in pairs(state.signals) do
             signal:Destroy()
         end
-
-        if state.shape == "Square" then
-            local index = table.find(squares, state.object)
-
-            if index then
-                table.remove(squares, index)
-            end
-        end
-
-        objmts[state.object] = nil
-        mtobjs[state.wrapper] = nil
-        objvisibles[state.object] = nil
-        objmtchildren[state.wrapper] = nil
 
         B.pending[state] = nil
         B.states[state.wrapper] = nil
@@ -924,10 +772,17 @@ do
     function B.methods:AddListLayout(padding)
         local state = B.states[self]
 
-        assert(state.shape == "Square", "List layouts require a Square")
+        assert(
+            state and state.shape == "Square",
+            "List layouts require a Square"
+        )
 
         state.list = true
-        state.padding = math.max(0, tonumber(padding) or 0)
+        state.padding = math.max(
+            0,
+            tonumber(padding) or 0
+        )
+
         state.validCount = 0
         state.childrenDirty = true
 
@@ -939,7 +794,10 @@ do
     function B.methods:MakeScrollable()
         local state = B.states[self]
 
-        assert(state.shape == "Square", "Scrolling requires a Square")
+        assert(
+            state and state.shape == "Square",
+            "Scrolling requires a Square"
+        )
 
         state.scrollable = true
         state.properties.ClipsDescendants = true
@@ -955,7 +813,9 @@ do
         local state = B.states[self]
         direction = tonumber(direction) or 0
 
-        if not state or not state.scrollable or direction == 0 then
+        if not state
+            or not state.scrollable
+            or direction == 0 then
             return false
         end
 
@@ -966,12 +826,18 @@ do
         local nextOffset
 
         if direction > 0 then
-            nextOffset = (math.floor(index + 0.000001) + 1) * step
+            nextOffset =
+                (math.floor(index + 0.000001) + 1) * step
         else
-            nextOffset = (math.ceil(index - 0.000001) - 1) * step
+            nextOffset =
+                (math.ceil(index - 0.000001) - 1) * step
         end
 
-        nextOffset = math.clamp(nextOffset, 0, state.maximum)
+        nextOffset = math.clamp(
+            nextOffset,
+            0,
+            state.maximum
+        )
 
         if math.abs(nextOffset - state.offset) < 0.000001 then
             return false
@@ -986,11 +852,21 @@ do
     end
 
     function B.methods:GetScrollState()
-        return B.metrics(B.states[self])
+        local state = B.states[self]
+
+        if not state then
+            return 0, 0, 0, 0
+        end
+
+        return B.metrics(state)
     end
 
     function B.methods:RefreshScrolling()
         local state = B.states[self]
+
+        if not state then
+            return
+        end
 
         state.offset = 0
         state.childrenDirty = true
@@ -1028,17 +904,12 @@ do
                 return B.content(state)
             end
 
-            if state.shape == "Square" and B.signalNames[key] then
+            if state.shape == "Square"
+                and B.signalNames[key] then
+
                 if not state.signals[key] then
                     state.signals[key] = Signal.new()
-
-                    objsignals[state.object] = objsignals[state.object] or {
-                        inputbegan = {},
-                        mouseentered = false,
-                        mouse1down = false
-                    }
-
-                    objsignals[state.object][key] = state.signals[key]
+                    B.interactive[state] = true
                 end
 
                 return state.signals[key]
@@ -1070,7 +941,6 @@ do
 
                 if state.visible ~= value then
                     state.visible = value
-                    objvisibles[state.object] = value
                     B.mark(state)
                 end
 
@@ -1079,7 +949,8 @@ do
 
             if key == "Position" then
                 assert(
-                    typeof(value) == "Vector2" or typeof(value) == "UDim2",
+                    typeof(value) == "Vector2"
+                        or typeof(value) == "UDim2",
                     "Position must be Vector2 or UDim2"
                 )
 
@@ -1093,7 +964,8 @@ do
 
             if key == "Size" and state.rectangular then
                 assert(
-                    typeof(value) == "Vector2" or typeof(value) == "UDim2",
+                    typeof(value) == "Vector2"
+                        or typeof(value) == "UDim2",
                     "Size must be Vector2 or UDim2"
                 )
 
@@ -1101,13 +973,16 @@ do
                     return
                 end
 
-                local scaledHeight = typeof(value) == "UDim2"
+                local scaledHeight =
+                    typeof(value) == "UDim2"
                     and value.Y.Scale ~= 0
 
                 local parent = state.parent
                     and B.states[state.parent]
 
-                if parent and scaledHeight ~= state.scaledHeight then
+                if parent
+                    and scaledHeight ~= state.scaledHeight then
+
                     parent.relativeHeightCount =
                         parent.relativeHeightCount
                         + (scaledHeight and 1 or -1)
@@ -1126,6 +1001,7 @@ do
                 if state.properties.ClipsDescendants ~= value then
                     state.properties.ClipsDescendants = value
                     state.contextDirty = true
+
                     B.mark(state)
                 end
 
@@ -1133,8 +1009,10 @@ do
             end
 
             if key == "ScrollStep" then
-                state.properties.ScrollStep =
-                    math.max(1, tonumber(value) or 32)
+                state.properties.ScrollStep = math.max(
+                    1,
+                    tonumber(value) or 32
+                )
 
                 return
             end
@@ -1169,14 +1047,20 @@ do
             end
 
             -- Color, image Data and other appearance-only properties
-            -- were already written directly. They need no layout pass.
+            -- are already applied and require no layout work.
         end
     }
 
     function drawing:new(shape)
         local object = Drawing.new(shape)
-        local rectangular = shape == "Square" or shape == "Image"
-        local wrapper = setmetatable({exists = true}, B.metatable)
+
+        local rectangular =
+            shape == "Square"
+            or shape == "Image"
+
+        local wrapper = setmetatable({
+            exists = true
+        }, B.metatable)
 
         local state = {
             wrapper = wrapper,
@@ -1194,6 +1078,7 @@ do
 
             visible = true,
             effectiveVisible = false,
+            dead = false,
 
             list = false,
             padding = 0,
@@ -1217,6 +1102,11 @@ do
             dirty = true,
             laidOut = false,
 
+            mouseEntered = false,
+            leftDown = false,
+            rightDown = false,
+            pressed = {},
+
             signals = {},
             written = {},
 
@@ -1228,59 +1118,63 @@ do
 
         B.states[wrapper] = state
 
-        objexists[object] = true
-        objvisibles[object] = true
-        objmts[object] = wrapper
-        mtobjs[wrapper] = object
-        objmtchildren[wrapper] = state.children
-
         if shape == "Square" then
-            table.insert(squares, object)
+            B.squares[state] = true
         end
 
-        -- New objects appear after their initial properties are applied.
         B.write(state, "Visible", false)
         B.mark(state)
 
         return wrapper
     end
 
-    -- A single shared render connection processes queued changes.
-    B.lastViewport = B.viewport()
-
-    B.renderConnection = Services.RunService.RenderStepped:Connect(function()
-        local viewport = B.viewport()
-
-        if viewport ~= B.lastViewport then
-            B.lastViewport = viewport
-
-            for _, state in pairs(B.states) do
-                if not state.parent then
-                    B.mark(state)
-                end
-            end
-        end
-
-        B.flush()
-    end)
-
-    -- A single wheel router checks scroll containers, not every drawing.
-    B.wheelConnection = Services.UserInputService.InputChanged:Connect(function(input)
-        if input.UserInputType ~= Enum.UserInputType.MouseWheel
-            or input.Position.Z == 0 then
+    -- Input uses the same state records as layout and rendering.
+    function B.fire(state, name, ...)
+        if state.dead then
             return
         end
 
+        local signal = state.signals[name]
+
+        if signal then
+            signal:Fire(...)
+        end
+    end
+
+    function B.hit(state, mouse)
+        return not state.dead
+            and state.object.Visible
+            and B.pointerInside(state.hitRect, mouse)
+    end
+
+    -- Compute the blocking ZIndex once per press/release.
+    -- This avoids scanning every square for every interactive object.
+    function B.topZ(mouse)
+        local top = -math.huge
+
+        for state in pairs(B.squares) do
+            if B.hit(state, mouse) then
+                top = math.max(
+                    top,
+                    state.object.ZIndex
+                )
+            end
+        end
+
+        return top
+    end
+
+    function B.wheel(input)
         B.flush()
 
-        local mouse = Services.UserInputService:GetMouseLocation()
+        local mouse = UIS:GetMouseLocation()
         local target
 
         for state in pairs(B.scrollables) do
             if state.list
                 and state.effectiveVisible
                 and state.maximum > 0
-                and B.pointerInside(state.hitRect, mouse) then
+                and B.hit(state, mouse) then
 
                 if not target
                     or state.layer > target.layer
@@ -1295,8 +1189,167 @@ do
         end
 
         if target then
-            target.wrapper:Scroll(input.Position.Z > 0 and -1 or 1)
+            target.wrapper:Scroll(
+                input.Position.Z > 0 and -1 or 1
+            )
         end
+    end
+
+    B.inputBeganConnection = UIS.InputBegan:Connect(function(input, gpe)
+        local mouse = UIS:GetMouseLocation()
+        local topZ = B.topZ(mouse)
+
+        local left =
+            input.UserInputType == Enum.UserInputType.MouseButton1
+
+        local right =
+            input.UserInputType == Enum.UserInputType.MouseButton2
+
+        for state in pairs(B.interactive) do
+            if B.hit(state, mouse)
+                and state.object.ZIndex >= topZ then
+
+                state.pressed[input] = true
+
+                if left then
+                    state.leftDown = true
+                elseif right then
+                    state.rightDown = true
+                end
+
+                B.fire(state, "InputBegan", input, gpe)
+
+                if left then
+                    B.fire(state, "MouseButton1Down")
+                elseif right then
+                    B.fire(state, "MouseButton2Down")
+                end
+            end
+        end
+    end)
+
+    B.inputEndedConnection = UIS.InputEnded:Connect(function(input, gpe)
+        local mouse = UIS:GetMouseLocation()
+        local topZ = B.topZ(mouse)
+
+        local left =
+            input.UserInputType == Enum.UserInputType.MouseButton1
+
+        local right =
+            input.UserInputType == Enum.UserInputType.MouseButton2
+
+        for state in pairs(B.interactive) do
+            local began = state.pressed[input]
+
+            local clickedLeft = left and state.leftDown
+            local clickedRight = right and state.rightDown
+
+            state.pressed[input] = nil
+
+            -- Clear button state even when released outside the object.
+            if left then
+                state.leftDown = false
+            elseif right then
+                state.rightDown = false
+            end
+
+            if began then
+                B.fire(state, "InputEnded", input, gpe)
+            end
+
+            if B.hit(state, mouse)
+                and state.object.ZIndex >= topZ then
+
+                if left then
+                    B.fire(state, "MouseButton1Up")
+
+                    if clickedLeft then
+                        B.fire(state, "MouseButton1Click")
+                    end
+                elseif right then
+                    B.fire(state, "MouseButton2Up")
+
+                    if clickedRight then
+                        B.fire(state, "MouseButton2Click")
+                    end
+                end
+            end
+        end
+    end)
+
+    B.inputChangedConnection = UIS.InputChanged:Connect(function(input, gpe)
+        if input.UserInputType == Enum.UserInputType.MouseWheel
+            and input.Position.Z ~= 0 then
+            B.wheel(input)
+        end
+
+        local mouse = UIS:GetMouseLocation()
+
+        local moved =
+            input.UserInputType == Enum.UserInputType.MouseMovement
+
+        for state in pairs(B.interactive) do
+            local signals = state.signals
+
+            if signals.MouseEnter
+                or signals.MouseLeave
+                or signals.MouseMoved
+                or signals.InputChanged then
+
+                if B.hit(state, mouse) then
+                    if not state.mouseEntered then
+                        state.mouseEntered = true
+
+                        B.fire(
+                            state,
+                            "MouseEnter",
+                            input.Position
+                        )
+                    end
+
+                    if moved then
+                        B.fire(
+                            state,
+                            "MouseMoved",
+                            input.Position
+                        )
+                    end
+
+                    B.fire(
+                        state,
+                        "InputChanged",
+                        input,
+                        gpe
+                    )
+                elseif state.mouseEntered then
+                    state.mouseEntered = false
+
+                    B.fire(
+                        state,
+                        "MouseLeave",
+                        input.Position
+                    )
+                end
+            end
+        end
+    end)
+
+    B.lastViewport = B.viewport()
+
+    B.renderConnection = RunService.RenderStepped:Connect(function()
+        local viewport = B.viewport()
+
+        if viewport ~= B.lastViewport then
+            B.lastViewport = viewport
+
+            for _, state in pairs(B.states) do
+                if not state.parent then
+                    B.mark(state)
+                end
+            end
+        end
+
+        B.flush()
     end)
 end
 
@@ -2191,10 +2244,6 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
         Transparency = 0,
         Size = UDim2.new(1, -6, 1, -6),
         Position = UDim2.new(0, 3, 0, 3),
-    
-        -- One option per scroll step: 16px height + 3px gap.
-        ScrollStep = 19,
-    
         Parent = contentframe
     })
 
