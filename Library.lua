@@ -2090,7 +2090,7 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
             utility.create("Text", {
                 Text = text,
                 Font = Drawing.Fonts.Plex,
-                Size = 11,
+                Size = 12,
                 Center = true,
                 Outline = true,
                 Theme = "Text",
@@ -2128,11 +2128,11 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
             set(selected)
         end)
     
-        createListButton("Disable all", 72, function()
+        createListButton("Disable all", 100, function()
             set({})
         end)
     end
-    
+
     function dropdowntypes:Set(option)
         set(option)
     end
