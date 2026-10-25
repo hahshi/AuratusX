@@ -286,6 +286,14 @@ do
         -- separately for every child or losing clipping at an intermediate node.
         if state.clipsDescendants and state.hasPosition then
             local x, y, width, height = getBounds(state)
+            local padding = state.clipPadding or 0
+
+            -- utility.outline fills a Square from (-1, -1) to (width+1,
+            -- height+1). Reserve that border around scrolling viewports so
+            -- full-width section outlines are not rejected by containment.
+            -- This affects clipping only, not layout or the scroll range.
+            x, y = x - padding, y - padding
+            width, height = width + padding * 2, height + padding * 2
 
             if left ~= nil then
                 left, top = max(left, x), max(top, y)
@@ -547,6 +555,7 @@ do
 
         state.scrollable = true
         state.clipsDescendants = true
+        state.clipPadding = 1
         state.scrollOffset = 0
         registerInput(state)
         changedInputStates[state] = true
@@ -1201,6 +1210,7 @@ do
         end
     end)
 end
+
 
 -- // UI LIBRARY
 
