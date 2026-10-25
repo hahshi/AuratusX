@@ -4008,7 +4008,7 @@ function library:Load(loadoptions)
 
                 function toggletypes:Keybind(options)
                     utility.table(options)
-                    local default = options.default
+                    local default = options.default or Enum.KeyCode.Unknown
                     local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete, Enum.KeyCode.None}
                     local flag = options.flag or utility.nextflag()
                     local mode = options.mode and options.mode:lower()
@@ -4511,7 +4511,7 @@ function library:Load(loadoptions)
             function sectiontypes:Keybind(options)
                 utility.table(options)
                 local name = options.name
-                local default = options.default
+                local default = options.default or Enum.KeyCode.Unknown
                 local blacklist = options.blacklist or {Enum.KeyCode.Unknown, Enum.KeyCode.Escape, Enum.KeyCode.Backspace, Enum.KeyCode.Delete, Enum.KeyCode.None}
                 local flag = options.flag or utility.nextflag()
                 local callback = options.callback or function(...) end
