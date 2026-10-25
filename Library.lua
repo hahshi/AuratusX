@@ -2149,11 +2149,11 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
             return button
         end
     
-        createListButton("Enable all", 0, function()
+        createListButton("Select all", 0, function()
             dropdowntypes:EnableAll()
         end)
 
-        createListButton("Disable all", 90, function()
+        createListButton("Deselect all", 90, function()
             dropdowntypes:DisableAll()
         end)
     end
