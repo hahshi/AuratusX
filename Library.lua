@@ -4256,6 +4256,7 @@ function library:Load(loadoptions)
             function sectiontypes:Slider(options)
                 utility.table(options)
                 local name = options.name
+                local hasName = name ~= nil and name ~= false and name ~= ""
                 local min = options.min or options.minimum or 0
                 local max = options.max or options.maximum or 100
                 local text = options.text or ("[value]/" .. max)
@@ -4263,32 +4264,34 @@ function library:Load(loadoptions)
                 local default = options.default and math.clamp(options.default, min, max) or min
                 local flag = options.flag or utility.nextflag()
                 local callback = options.callback or function(...) end
-
+            
                 local holder = utility.create("Square", {
                     Transparency = 0,
-                    Size = UDim2.new(1, 0, 0, 24),
+                    Size = UDim2.new(1, 0, 0, hasName and 24 or 10),
                     ZIndex = 7,
                     Thickness = 0,
                     Filled = true,
                     Parent = sectioncontent
                 })
-
-                utility.create("Text", {
-                    Text = name,
-                    Font = Drawing.Fonts.Plex,
-                    Size = 13,
-                    Position = UDim2.new(0, 0, 0, -2),
-                    Theme = "Text",
-                    ZIndex = 7,
-                    Outline = true,
-                    Parent = holder
-                })
-
+            
+                if hasName then
+                    utility.create("Text", {
+                        Text = tostring(name),
+                        Font = Drawing.Fonts.Plex,
+                        Size = 13,
+                        Position = UDim2.new(0, 0, 0, -2),
+                        Theme = "Text",
+                        ZIndex = 7,
+                        Outline = true,
+                        Parent = holder
+                    })
+                end
+            
                 section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
-
+            
                 return library.createslider(min, max, holder, text, default, float, flag, callback, sectiontypes)
             end
-
+            
             function sectiontypes:Dropdown(options)
                 utility.table(options)
                 local name = options.name
