@@ -87,812 +87,1120 @@ do
         setmetatable(self, nil)
     end
 
-    local function ismouseover(obj)
-        local posX, posY = obj.Position.X, obj.Position.Y
-        local sizeX, sizeY = posX + obj.Size.X, posY + obj.Size.Y
-        local mousepos = Services.UserInputService:GetMouseLocation()
+    -- Signal above is unchanged. Everything below belongs to the Drawing wrapper.
+    -- Uses the existing Services and Drawing globals; no polling/render loop.
+    -- Clipping keeps fully contained primitives visible, as in the original.
+    -- Line/Quad/Triangle retain their native point coordinates when parented.
 
-        return mousepos.X >= posX and mousepos.Y >= posY and mousepos.X <= sizeX and mousepos.Y <= sizeY
-    end
+    local UserInputService = Services.UserInputService
+    local UserInputType = Enum.UserInputType
+    local MouseButton1 = UserInputType.MouseButton1
+    local MouseButton2 = UserInputType.MouseButton2
+    local MouseMovement = UserInputType.MouseMovement
+    local MouseWheel = UserInputType.MouseWheel
+    local vector2 = Vector2.new
+    local floor = math.floor
+    local min = math.min
+    local max = math.max
+    local zero = vector2(0, 0)
 
-    local function udim2tovector2(udim2, vec2)
-        local xscalevector2 = vec2.X * udim2.X.Scale
-        local yscalevector2 = vec2.Y * udim2.Y.Scale
-
-        return Vector2.new(xscalevector2 + udim2.X.Offset, yscalevector2 + udim2.Y.Offset)
-    end
-
-    local function istouching(pos1, size1, pos2, size2)
-        local top = pos2.Y - pos1.Y
-        local bottom = pos2.Y + size2.Y - (pos1.Y + size1.Y)
-        local left = pos2.X - pos1.X
-        local right = pos2.X + size2.X - (pos1.X + size1.X)
-
-        local touching = true
-
-        if top > 0 then
-            touching = false
-        elseif bottom < 0 then
-            touching = false
-        elseif left > 0 then
-            touching = false
-        elseif right < 0 then
-            touching = false
-        end
-
-        return touching
-    end
-
-    local objchildren = {}
-    local objmts = {}
-    local objvisibles = {}
-    local mtobjs = {}
-    local udim2posobjs = {}
-    local udim2sizeobjs = {}
-    local objpositions = {}
-    local listobjs = {}
-    local listcontents = {}
-    local listchildren = {}
-    local listadds = {}
-    local objpaddings = {}
-    local scrollobjs = {}
-    local listindexes = {}
-    local custompropertysets = {}
-    local custompropertygets = {}
-    local objmtchildren = {}
-    local scrollpositions = {}
-    local childrenposupdates = {}
-    local childrenvisupdates = {}
+    -- One state record per wrapper replaces the separate object/property maps.
+    local states = {}
     local squares = {}
-    local objsignals = {}
-    local objexists = {}
+    local inputStates = {}
+    local changedInputStates = {}
+    local methods = {}
+    local layoutDepth = 0
+    local pendingScrollGroups = {}
+    local refreshScrollGroup
 
-    local function mouseoverhighersquare(obj)
-        for _, square in next, squares do
-            if square.Visible == true and square.ZIndex > obj.ZIndex then
-                if ismouseover(square) then
-                    return true
-                end
+    local signalNames = {
+        MouseButton1Click = true,
+        MouseButton1Up = true,
+        MouseButton1Down = true,
+        MouseButton2Click = true,
+        MouseButton2Up = true,
+        MouseButton2Down = true,
+        InputBegan = true,
+        InputEnded = true,
+        InputChanged = true,
+        MouseEnter = true,
+        MouseLeave = true,
+        MouseMoved = true
+    }
+
+    local textBoundsProperties = {
+        Text = true,
+        Size = true,
+        Font = true,
+        Center = true
+    }
+
+    local changedSignalNames = {
+        InputChanged = true,
+        MouseEnter = true,
+        MouseLeave = true,
+        MouseMoved = true
+    }
+
+    local function requireState(self)
+        local state = states[self]
+        assert(state and state.alive, "Drawing object has been removed")
+        return state
+    end
+
+    local function getDimensions(state)
+        if state.hasSize then
+            local size = state.absoluteSize
+            return size.X, size.Y
+        end
+
+        if state.shape == "Text" then
+            local size = state.object.TextBounds
+            return size.X, size.Y
+        end
+
+        if state.shape == "Circle" then
+            local diameter = state.object.Radius * 2
+            return diameter, diameter
+        end
+
+        return 0, 0
+    end
+
+    local function getReferenceDimensions(state)
+        if state.parent then
+            return getDimensions(state.parent)
+        end
+
+        local camera = workspace.CurrentCamera
+        local viewport = camera and camera.ViewportSize or zero
+        return viewport.X, viewport.Y
+    end
+
+    local function getBounds(state)
+        local position = state.absolutePosition or zero
+        local x, y = position.X, position.Y
+        local width, height = getDimensions(state)
+
+        if state.shape == "Circle" then
+            x = x - width * 0.5
+            y = y - height * 0.5
+        elseif state.shape == "Text" and state.object.Center then
+            x = x - width * 0.5
+        end
+
+        return x, y, width, height
+    end
+
+    local function syncSize(state)
+        if not state.hasSize then
+            return
+        end
+
+        local value = state.size
+        local width, height
+
+        if typeof(value) == "UDim2" then
+            local referenceWidth, referenceHeight = getReferenceDimensions(state)
+            width = referenceWidth * value.X.Scale + value.X.Offset
+            height = referenceHeight * value.Y.Scale + value.Y.Offset
+        else
+            width, height = value.X, value.Y
+        end
+
+        width, height = floor(width), floor(height)
+        local oldSize = state.absoluteSize
+
+        if oldSize.X ~= width or oldSize.Y ~= height then
+            local size = vector2(width, height)
+            state.object.Size = size
+            state.absoluteSize = size
+        end
+    end
+
+    local function syncPosition(state)
+        if not state.hasPosition then
+            return
+        end
+
+        local parent = state.parent
+        local x, y
+
+        if parent and parent.list then
+            x, y = 0, state.listOffset - parent.scrollOffset
+        else
+            local value = state.position
+
+            if typeof(value) == "UDim2" then
+                local referenceWidth, referenceHeight = getReferenceDimensions(state)
+                x = referenceWidth * value.X.Scale + value.X.Offset
+                y = referenceHeight * value.Y.Scale + value.Y.Offset
+            else
+                x, y = value.X, value.Y
+            end
+        end
+
+        if parent then
+            local parentPosition = parent.absolutePosition or zero
+            x = floor(parentPosition.X + x)
+            y = floor(parentPosition.Y + y)
+        end
+
+        local oldPosition = state.absolutePosition
+
+        if not oldPosition or oldPosition.X ~= x or oldPosition.Y ~= y then
+            local position = vector2(x, y)
+            state.object.Position = position
+            state.absolutePosition = position
+        end
+    end
+
+    local function syncVisibility(state)
+        local parent = state.parent
+        local branchVisible = state.visible and (not parent or parent.branchVisible)
+        local visible = branchVisible
+        local left, top, right, bottom
+
+        -- A clipped container background must not hide descendants that have
+        -- scrolled into view. Explicit Visible=false still hides the subtree.
+        state.branchVisible = branchVisible
+
+        if parent then
+            left, top = parent.clipLeft, parent.clipTop
+            right, bottom = parent.clipRight, parent.clipBottom
+        end
+
+        if visible and left ~= nil and state.hasPosition then
+            local x, y, width, height = getBounds(state)
+            visible = x >= left and y >= top
+                and x + width <= right and y + height <= bottom
+        end
+
+        if state.effectiveVisible ~= visible then
+            state.object.Visible = visible
+            state.effectiveVisible = visible
+        end
+
+        -- Cache the intersection for descendants instead of walking ancestors
+        -- separately for every child or losing clipping at an intermediate node.
+        if state.clipsDescendants and state.hasPosition then
+            local x, y, width, height = getBounds(state)
+
+            if left ~= nil then
+                left, top = max(left, x), max(top, y)
+                right, bottom = min(right, x + width), min(bottom, y + height)
+            else
+                left, top, right, bottom = x, y, x + width, y + height
+            end
+        end
+
+        state.clipLeft, state.clipTop = left, top
+        state.clipRight, state.clipBottom = right, bottom
+    end
+
+    local function updateVisibility(state)
+        syncVisibility(state)
+
+        local children = state.children
+        for i = 1, #children do
+            local child = states[children[i]]
+            if child and child.alive then
+                updateVisibility(child)
             end
         end
     end
 
-    Services.UserInputService.InputEnded:Connect(function(input, gpe)
-        for obj, signals in next, objsignals do
-            if objexists[obj] then
-                if signals.inputbegan[input] then
-                    signals.inputbegan[input] = false
+    local function updatePositions(state)
+        syncPosition(state)
+        syncVisibility(state)
 
-                    if signals.InputEnded then
-                        signals.InputEnded:Fire(input, gpe)
-                    end
+        local children = state.children
+        for i = 1, #children do
+            local child = states[children[i]]
+            if child and child.alive then
+                updatePositions(child)
+            end
+        end
+    end
+
+    local function getOwnScrollRange(state)
+        local _, height = getDimensions(state)
+        local viewport = max(0, height)
+        local total = max(0, state.contentSize or 0)
+        return max(0, total - viewport), viewport, total
+    end
+
+    local function getGroupScrollRange(group)
+        local maximum, total = 0, 0
+        local members = group.members
+
+        for i = 1, #members do
+            local member = members[i]
+            if member.alive and member.scrollGroup == group then
+                local memberMaximum, _, memberTotal = getOwnScrollRange(member)
+                maximum = max(maximum, memberMaximum)
+                total = max(total, memberTotal)
+            end
+        end
+
+        return maximum, total
+    end
+
+    local function getScrollRange(state)
+        local maximum, viewport, total = getOwnScrollRange(state)
+        local group = state.scrollGroup
+
+        if group then
+            maximum, total = getGroupScrollRange(group)
+        end
+
+        return maximum, viewport, total
+    end
+
+    local function updateLayout(state, sizeIsCurrent)
+        layoutDepth = layoutDepth + 1
+
+        if not sizeIsCurrent then
+            syncSize(state)
+        end
+
+        syncPosition(state)
+        syncVisibility(state)
+
+        local children = state.children
+
+        if state.list then
+            local contentSize = 0
+
+            -- Resolve direct children's sizes before calculating offsets, so
+            -- UDim2 sizes, content height, and scrolling agree in the same pass.
+            for i = 1, #children do
+                local child = states[children[i]]
+                syncSize(child)
+
+                if i > 1 then
+                    contentSize = contentSize + state.padding
                 end
 
-                if obj.Visible then
-                    if ismouseover(obj) then
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 and not mouseoverhighersquare(obj) then
-                            if signals.MouseButton1Up then
-                                signals.MouseButton1Up:Fire()
-                            end
+                child.listOffset = contentSize
+                local _, height = getDimensions(child)
+                contentSize = contentSize + height
+            end
 
-                            if signals.mouse1down and signals.MouseButton1Click then
-                                signals.mouse1down = false
-                                signals.MouseButton1Click:Fire()
-                            end
-                        end
+            state.contentSize = contentSize
 
-                        if input.UserInputType == Enum.UserInputType.MouseButton2 and not mouseoverhighersquare(obj) then
-                            if signals.MouseButton2Up then
-                                signals.MouseButton2Up:Fire()
-                            end
-                        end
-                    end
+            if state.scrollGroup then
+                -- Both columns use this offset even if one column is shorter.
+                -- Clamp after the entire layout pass, once both are measured.
+                state.scrollOffset = state.scrollGroup.offset
+                pendingScrollGroups[state.scrollGroup] = true
+            elseif state.scrollable then
+                local maximum = getScrollRange(state)
+                state.scrollOffset = min(maximum, max(0, state.scrollOffset))
+            else
+                state.scrollOffset = 0
+            end
+        end
+
+        for i = 1, #children do
+            local child = states[children[i]]
+            if child and child.alive then
+                updateLayout(child, state.list)
+            end
+        end
+
+        layoutDepth = layoutDepth - 1
+
+        if layoutDepth == 0 then
+            for group in next, pendingScrollGroups do
+                pendingScrollGroups[group] = nil
+                refreshScrollGroup(group)
+            end
+        end
+    end
+
+    local function updateChildPositions(state)
+        local children = state.children
+        for i = 1, #children do
+            local child = states[children[i]]
+            if child and child.alive then
+                updatePositions(child)
+            end
+        end
+    end
+
+    refreshScrollGroup = function(group, requestedOffset)
+        local maximum = getGroupScrollRange(group)
+        local offset = requestedOffset
+
+        if offset == nil then
+            offset = group.offset
+        end
+
+        offset = min(maximum, max(0, offset))
+        local changed = group.offset ~= offset
+        group.offset = offset
+
+        local members = group.members
+        for i = 1, #members do
+            local member = members[i]
+            if member.alive and member.scrollGroup == group and member.scrollOffset ~= offset then
+                member.scrollOffset = offset
+                updateChildPositions(member)
+                changed = true
+            end
+        end
+
+        return changed
+    end
+
+    local function unlinkScrollGroup(state)
+        local group = state.scrollGroup
+        if not group then
+            return nil
+        end
+
+        state.scrollGroup = nil
+        local members = group.members
+
+        for i = 1, #members do
+            if members[i] == state then
+                table.remove(members, i)
+                break
+            end
+        end
+
+        if #members == 0 then
+            pendingScrollGroups[group] = nil
+        end
+
+        return group
+    end
+
+    local function scroll(state, direction)
+        if direction == 0 then
+            return false
+        end
+
+        local group = state.scrollGroup
+        if group then
+            -- Use a fixed pixel step for tabs so a tall section cannot cause
+            -- a whole section-sized jump. Both columns move the same distance.
+            local step = direction > 0 and group.step or -group.step
+            return refreshScrollGroup(group, group.offset + step)
+        end
+
+        local offset = state.scrollOffset
+        local maximum = getScrollRange(state)
+        local target
+        local children = state.children
+
+        if direction > 0 then
+            if offset >= maximum then
+                return false
+            end
+
+            target = maximum
+            for i = 1, #children do
+                local childOffset = states[children[i]].listOffset
+                if childOffset > offset then
+                    target = min(maximum, childOffset)
+                    break
+                end
+            end
+        else
+            if offset <= 0 then
+                return false
+            end
+
+            target = 0
+            for i = #children, 1, -1 do
+                local childOffset = states[children[i]].listOffset
+                if childOffset < offset then
+                    target = max(0, childOffset)
+                    break
                 end
             end
         end
-    end)
 
-    Services.UserInputService.InputChanged:Connect(function(input, gpe)
-        for obj, signals in next, objsignals do
-            if objexists[obj] and obj.Visible and (signals.MouseEnter or signals.InputChanged or signals.MouseLeave) then
-                if ismouseover(obj) then
-                    if not signals.mouseentered then
-                        signals.mouseentered = true
+        if target == offset then
+            return false
+        end
 
-                        if signals.MouseEnter then
-                            signals.MouseEnter:Fire(input.Position)
-                        end
+        state.scrollOffset = target
+        updateChildPositions(state)
+        return true
+    end
 
-                        if signals.MouseMoved then
-                            signals.MouseMoved:Fire(input.Position)
-                        end
-                    end
+    local function registerInput(state)
+        if not state.inputBegan then
+            state.inputBegan = {}
+        end
+        inputStates[state] = true
+    end
 
-                    if signals.InputChanged then
-                        signals.InputChanged:Fire(input, gpe)
-                    end
-                elseif signals.mouseentered then
-                    signals.mouseentered = false
+    local function enableScrolling(state)
+        if state.scrollable or not state.list then
+            return
+        end
 
-                    if signals.MouseLeave then
-                        signals.MouseLeave:Fire(input.Position)
-                    end
-                end
+        state.scrollable = true
+        state.clipsDescendants = true
+        state.scrollOffset = 0
+        registerInput(state)
+        changedInputStates[state] = true
+
+        -- These two original methods also allowed calls without a receiver.
+        -- Bind them once per scrollable object, rather than on every lookup.
+        local wrapper = state.wrapper
+        state.getScrollState = function()
+            return methods.GetScrollState(wrapper)
+        end
+        state.refreshScrolling = function()
+            return methods.RefreshScrolling(wrapper)
+        end
+
+        updateLayout(state)
+    end
+
+    local function detach(state)
+        local parent = state.parent
+        if not parent then
+            return
+        end
+
+        local index = state.parentIndex
+        local children = parent.children
+        table.remove(children, index)
+
+        for i = index, #children do
+            states[children[i]].parentIndex = i
+        end
+
+        state.parent = nil
+        state.parentIndex = nil
+        state.listOffset = 0
+    end
+
+    local function setParent(state, value)
+        local parent
+
+        if value ~= nil then
+            parent = states[value]
+            assert(parent and parent.alive, "Parent must be a live Drawing wrapper or nil")
+
+            local ancestor = parent
+            while ancestor do
+                assert(ancestor ~= state, "A Drawing object cannot parent itself or an ancestor")
+                ancestor = ancestor.parent
             end
         end
-    end)
 
-    Services.UserInputService.InputBegan:Connect(function(input, gpe)
-        for obj, signals in next, objsignals do
-            if objexists[obj] then
-                if obj.Visible then
-                    if ismouseover(obj) and not mouseoverhighersquare(obj) then 
-                        signals.inputbegan[input] = true
+        if state.parent == parent then
+            return
+        end
 
-                        if signals.InputBegan then
-                            signals.InputBegan:Fire(input, gpe)
-                        end
+        local previousParent = state.parent
+        detach(state)
 
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 and (not mouseoverhighersquare(obj) or obj.Transparency == 0) then
-                            signals.mouse1down = true
+        if previousParent and previousParent.alive and previousParent.list then
+            updateLayout(previousParent)
+        end
 
-                            if signals.MouseButton1Down then
-                                signals.MouseButton1Down:Fire()
-                            end
-                        end
+        state.parent = parent
 
-                        if input.UserInputType == Enum.UserInputType.MouseButton2 and (not mouseoverhighersquare(obj) or obj.Transparency == 0) then
-                            if signals.MouseButton2Down then
-                                signals.MouseButton2Down:Fire()
-                            end
-                        end
-                    end
-                end
+        if parent then
+            local children = parent.children
+            local index = #children + 1
+            children[index] = state.wrapper
+            state.parentIndex = index
+        end
+
+        if parent and parent.list then
+            updateLayout(parent)
+        else
+            updateLayout(state)
+        end
+    end
+
+    function methods:GetChildren()
+        return requireState(self).children
+    end
+
+    function methods:AddListLayout(padding)
+        local state = requireState(self)
+        padding = padding or 0
+        assert(type(padding) == "number", "List padding must be a number")
+
+        if state.list and state.padding == padding then
+            return
+        end
+
+        state.list = true
+        state.padding = padding
+
+        if state.scrollRequested and not state.scrollable then
+            enableScrolling(state)
+        else
+            updateLayout(state)
+        end
+    end
+
+    function methods:MakeScrollable()
+        local state = requireState(self)
+        state.scrollRequested = true
+        enableScrolling(state)
+    end
+
+    function methods:Scroll(direction)
+        local state = requireState(self)
+        assert(type(direction) == "number", "Scroll direction must be a number")
+        return scroll(state, direction)
+    end
+
+    function methods:GetScrollState()
+        local state = requireState(self)
+        local maximum, viewport, total = getScrollRange(state)
+        return state.scrollOffset, maximum, viewport, total
+    end
+
+    function methods:RefreshScrolling()
+        local state = requireState(self)
+
+        if state.scrollGroup then
+            refreshScrollGroup(state.scrollGroup, 0)
+            return
+        end
+
+        -- Reset once instead of repeatedly scrolling and walking the same tree.
+        if state.scrollOffset ~= 0 then
+            state.scrollOffset = 0
+            updateChildPositions(state)
+        end
+    end
+
+    function methods:Remove()
+        local state = states[self]
+        if not state or not state.alive then
+            return
+        end
+
+        state.alive = false
+        rawset(self, "exists", false)
+        inputStates[state] = nil
+        changedInputStates[state] = nil
+        local scrollGroup = unlinkScrollGroup(state)
+
+        if state.squareIndex then
+            local index = state.squareIndex
+            local lastIndex = #squares
+            local last = squares[lastIndex]
+            squares[index] = last
+            squares[lastIndex] = nil
+
+            if index ~= lastIndex then
+                last.squareIndex = index
             end
         end
-    end)
+
+        -- Remove from the end because every removal detaches that child.
+        local children = state.children
+        while #children > 0 do
+            methods.Remove(children[#children])
+        end
+
+        local parent = state.parent
+        detach(state)
+
+        if state.signals then
+            for _, signal in next, state.signals do
+                signal:Destroy()
+            end
+        end
+
+        state.object:Remove()
+        states[self] = nil
+        state.object = nil
+        state.wrapper = nil
+        state.signals = nil
+        state.inputBegan = nil
+        state.mouse1Input = nil
+        state.mouse2Input = nil
+        state.getScrollState = nil
+        state.refreshScrolling = nil
+
+        if parent and parent.alive and parent.list then
+            updateLayout(parent)
+        end
+
+        if scrollGroup then
+            refreshScrollGroup(scrollGroup)
+        end
+    end
+
+    local function getSignal(state, name)
+        local signals = state.signals
+        if not signals then
+            signals = {}
+            state.signals = signals
+        end
+
+        local signal = signals[name]
+        if not signal then
+            signal = Signal.new()
+            signals[name] = signal
+            registerInput(state)
+            if changedSignalNames[name] then
+                changedInputStates[state] = true
+            end
+        end
+
+        return signal
+    end
+
+    local wrapperMetatable = {
+        __index = function(self, key)
+            local state = states[self]
+
+            if key == "Remove" then
+                return methods.Remove
+            end
+
+            if not state then
+                return nil
+            end
+
+            if key == "Parent" then
+                return state.parent and state.parent.wrapper
+            elseif key == "Visible" then
+                return state.visible
+            elseif key == "Position" and state.hasPosition then
+                return state.position
+            elseif key == "Size" and state.hasSize then
+                if typeof(state.size) == "UDim2" then
+                    return state.size
+                end
+                return state.absoluteSize
+            elseif key == "AbsolutePosition" then
+                return state.absolutePosition
+            elseif key == "AbsoluteSize" then
+                if state.hasSize then
+                    return state.absoluteSize
+                end
+                local width, height = getDimensions(state)
+                return vector2(width, height)
+            elseif key == "ClipsDescendants" then
+                return state.clipsDescendants
+            elseif key == "AbsoluteContentSize" then
+                return state.contentSize
+            elseif key == "GetChildren" then
+                return methods.GetChildren
+            end
+
+            if state.shape == "Square" then
+                if key == "AddListLayout" or key == "MakeScrollable" then
+                    return methods[key]
+                end
+
+                if state.scrollable then
+                    if key == "Scroll" then
+                        return methods.Scroll
+                    elseif key == "GetScrollState" then
+                        return state.getScrollState
+                    elseif key == "RefreshScrolling" then
+                        return state.refreshScrolling
+                    end
+                end
+
+                if signalNames[key] then
+                    return getSignal(state, key)
+                end
+            end
+
+            return state.object[key]
+        end,
+
+        __newindex = function(self, key, value)
+            local state = requireState(self)
+
+            if key == "Parent" then
+                setParent(state, value)
+                return
+            end
+
+            if key == "Visible" or key == "ClipsDescendants" then
+                assert(type(value) == "boolean", key .. " must be a boolean")
+                local field = key == "Visible" and "visible" or "clipsDescendants"
+
+                if state[field] ~= value then
+                    state[field] = value
+                    updateVisibility(state)
+                end
+                return
+            end
+
+            if key == "Position" and state.hasPosition then
+                local valueType = typeof(value)
+                assert(valueType == "Vector2" or valueType == "UDim2", "Position must be a Vector2 or UDim2")
+
+                if state.position ~= value or valueType == "UDim2" then
+                    -- Replacing this one value also clears an earlier UDim2.
+                    state.position = value
+                    if not state.parent or not state.parent.list then
+                        updatePositions(state)
+                    end
+                end
+                return
+            end
+
+            if key == "Size" and state.hasSize then
+                local valueType = typeof(value)
+                assert(valueType == "Vector2" or valueType == "UDim2", "Size must be a Vector2 or UDim2")
+
+                if state.size ~= value or valueType == "UDim2" then
+                    local oldHeight = state.absoluteSize.Y
+                    state.size = value
+                    syncSize(state)
+
+                    local parent = state.parent
+                    if parent and parent.list and state.absoluteSize.Y ~= oldHeight then
+                        updateLayout(parent)
+                    else
+                        updateLayout(state, true)
+                    end
+                end
+                return
+            end
+
+            local changesBounds = (state.shape == "Text" and textBoundsProperties[key])
+                or (state.shape == "Circle" and key == "Radius")
+
+            if changesBounds then
+                local _, oldHeight = getDimensions(state)
+                state.object[key] = value
+                local _, newHeight = getDimensions(state)
+                local parent = state.parent
+
+                if parent and parent.list and oldHeight ~= newHeight then
+                    updateLayout(parent)
+                else
+                    updateLayout(state)
+                end
+            else
+                -- All remaining native Drawing properties pass through.
+                state.object[key] = value
+            end
+        end
+    }
 
     function drawing:new(shape)
-        local obj = Drawing.new(shape)
-        objexists[obj] = true
-        local signalnames = {}
-
-        local listfunc
-        local scrollfunc
-        local refreshscrolling
-
-        if shape == "Square" then
-            table.insert(squares, obj)
-
-            signalnames = {
-                MouseButton1Click = Signal.new(),
-                MouseButton1Up = Signal.new(),
-                MouseButton1Down = Signal.new(),
-                MouseButton2Click = Signal.new(),
-                MouseButton2Up = Signal.new(),
-                MouseButton2Down = Signal.new(),
-                InputBegan = Signal.new(),
-                InputEnded = Signal.new(),
-                InputChanged = Signal.new(),
-                MouseEnter = Signal.new(),
-                MouseLeave = Signal.new(),
-                MouseMoved = Signal.new()
-            }
-
-            local attemptedscrollable = false
-
-            scrollfunc = function(self)
-                if listobjs[self] then
-                    scrollpositions[self] = 0
-                    scrollobjs[self] = true
-
-                    self.ClipsDescendants = true
-
-                    local function scroll(amount)
-                        local currentclippedobj, docontinue = nil, false
-
-                        for _, object in next, listchildren[self] do
-                            if amount == 1 then
-                                if object.Position.Y > mtobjs[self].Position.Y then
-                                    if not istouching(object.Position, object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                        if not currentclippedobj then
-                                            currentclippedobj = object
-                                        end
-
-                                        docontinue = true
-                                    end
-                                end
-                            end
-
-                            if amount == -1 then
-                                if object.Position.Y <= mtobjs[self].Position.Y then
-                                    if not istouching(object.Position, object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                        currentclippedobj = object
-                                        docontinue = true
-                                    end
-                                end
-                            end
-                        end
-
-                        if docontinue then
-                            if amount > 0 then
-                                local poschange = -(currentclippedobj.Size.Y + objpaddings[self])
-                                local closestobj
-
-                                for _, object in next, objchildren[self] do
-                                    if istouching(object.Position + Vector2.new(0, poschange), object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                        closestobj = object
-                                        break
-                                    end
-                                end
-
-                                local diff = (Vector2.new(0, mtobjs[self].Position.Y) - Vector2.new(0, (closestobj.Position.Y + poschange + objpaddings[self]))).magnitude
-
-                                if custompropertygets[mtobjs[self]]("ClipsDescendants") then
-                                    for _, object in next, objchildren[self] do
-                                        if not istouching(object.Position + Vector2.new(0, poschange - diff + objpaddings[self]), object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                            object.Visible = false
-                                            childrenvisupdates[objmts[object]](objmts[object], false)
-                                        else
-                                            object.Visible = true
-                                            childrenvisupdates[objmts[object]](objmts[object], true)
-                                        end
-                                    end
-                                end
-
-                                scrollpositions[self] = scrollpositions[self] + (poschange - diff + objpaddings[self])
-
-                                for _, object in next, objchildren[self] do
-                                    childrenposupdates[objmts[object]](objmts[object], object.Position + Vector2.new(0, poschange - diff + objpaddings[self]))
-                                    object.Position = object.Position + Vector2.new(0, poschange - diff + objpaddings[self])
-                                end
-                            else
-                                local poschange = currentclippedobj.Size.Y + objpaddings[self]
-
-                                if custompropertygets[mtobjs[self]]("ClipsDescendants") then
-                                    for _, object in next, objchildren[self] do
-                                        if not istouching(object.Position + Vector2.new(0, poschange), object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                            object.Visible = false
-                                            childrenvisupdates[objmts[object]](objmts[object], false)
-                                        else
-                                            object.Visible = true
-                                            childrenvisupdates[objmts[object]](objmts[object], true)
-                                        end
-                                    end
-                                end
-
-                                scrollpositions[self] = scrollpositions[self] + poschange
-
-                                for _, object in next, objchildren[self] do
-                                    childrenposupdates[objmts[object]](objmts[object], object.Position + Vector2.new(0, poschange))
-                                    object.Position = object.Position + Vector2.new(0, poschange)
-                                end
-                            end
-                        end
-
-                        return docontinue
-                    end
-
-                    rawset(self, "Scroll", function(_, direction)
-                        if direction == 0 then
-                            return false
-                        end
-
-                        return scroll(direction > 0 and 1 or -1)
-                    end)
-
-                    rawset(self, "GetScrollState", function()
-                        local viewport = math.max(0, mtobjs[self].Size.Y)
-                        local total = math.max(0, listcontents[self] or 0)
-                        local offset = math.max(0, -(scrollpositions[self] or 0))
-
-                        return offset, math.max(0, total - viewport), viewport, total
-                    end)
-
-                    refreshscrolling = function()
-                        repeat
-                        until
-                            not scroll(-1)
-                    end
-
-                    self.InputChanged:Connect(function(input)
-                        if input.UserInputType == Enum.UserInputType.MouseWheel then
-                            if input.Position.Z > 0 then
-                                scroll(-1)
-                            else
-                                scroll(1)
-                            end
-                        end
-                    end)
-                else
-                    attemptedscrollable = true
-                end
-            end
-
-            listfunc = function(self, padding)
-                objpaddings[self] = padding
-                listcontents[self] = 0
-                listchildren[self] = {}
-                listindexes[self] = {}
-                listadds[self] = {}
-
-                listobjs[self] = true
-
-                for _, object in next, objchildren[self] do
-                    table.insert(listchildren[self], object)
-                    table.insert(listindexes[self], listcontents[self] + (#listchildren[self] == 1 and 0 or padding))
-
-                    local newpos = mtobjs[self].Position + Vector2.new(0, listcontents[self] + (#listchildren[self] == 1 and 0 or padding))
-                    object.Position = newpos
-                    
-                    childrenposupdates[object](objmts[object], newpos)
-
-                    custompropertysets[object]("AbsolutePosition", newpos)
-                    
-                    listadds[self][object] = object.Size.Y + (#listchildren[self] == 1 and 0 or padding)
-                    listcontents[self] = listcontents[self] + object.Size.Y + (#listchildren[self] == 1 and 0 or padding)
-                end
-
-                if attemptedscrollable then
-                    scrollfunc(self)
-                end
-            end
-        end
-
-        local customproperties = {
-            ClipsDescendants = false
+        local object = Drawing.new(shape)
+        local wrapper = setmetatable({exists = true}, wrapperMetatable)
+        local hasSize = shape == "Square" or shape == "Image"
+        local initialSize = hasSize and object.Size or nil
+        local state = {
+            object = object,
+            wrapper = wrapper,
+            shape = shape,
+            alive = true,
+            children = {},
+            visible = true,
+            clipsDescendants = false,
+            hasPosition = shape ~= "Line" and shape ~= "Quad" and shape ~= "Triangle",
+            hasSize = hasSize,
+            position = zero,
+            size = initialSize,
+            absoluteSize = initialSize,
+            listOffset = 0,
+            scrollOffset = 0,
+            mouseEntered = false
         }
 
-        custompropertysets[obj] = function(k, v)
-            customproperties[k] = v
+        states[wrapper] = state
+
+        if shape == "Square" then
+            local index = #squares + 1
+            squares[index] = state
+            state.squareIndex = index
         end
 
-        custompropertygets[obj] = function(k)
-            return customproperties[k]
-        end
-
-        local mt = setmetatable({exists = true}, {
-            __index = function(self, k)
-                if k == "Parent" then
-                    return customproperties.Parent
-                end
-
-                if k == "Visible" then
-                    return objvisibles[obj]
-                end
-
-                if k == "Position" then
-                    return udim2posobjs[obj] or objpositions[obj] or obj[k]
-                end
-
-                if k == "Size" then
-                    return udim2sizeobjs[obj] or obj[k]
-                end
-
-                if k == "AddListLayout" and listfunc then
-                    return listfunc
-                end
-
-                if k == "MakeScrollable" and scrollfunc then
-                    return scrollfunc
-                end
-
-                if k == "RefreshScrolling" and refreshscrolling then
-                    return refreshscrolling
-                end
-
-                if k == "AbsoluteContentSize" then
-                    return listcontents[self]
-                end
-
-                if k == "GetChildren" then
-                    return function(self)
-                        return objmtchildren[self]
-                    end
-                end
-
-                if k == "Remove" then
-                    return function(self)
-                        rawset(self, "exists", false)
-                        objexists[obj] = false
-
-                        if customproperties.Parent and listobjs[customproperties.Parent] then
-                            local objindex = table.find(objchildren[customproperties.Parent], obj)
-
-                            listcontents[customproperties.Parent] = listcontents[customproperties.Parent] - listadds[customproperties.Parent][obj]
-            
-                            for i, object in next, objchildren[customproperties.Parent] do
-                                if i > objindex then
-                                    object.Position = object.Position - Vector2.new(0, listadds[customproperties.Parent][obj])
-                                end
-                            end
-
-                            if table.find(listchildren[customproperties.Parent], obj) then
-                                table.remove(listchildren[customproperties.Parent], table.find(listchildren[customproperties.Parent], obj))
-                            end
-
-                            if table.find(objchildren[customproperties.Parent], obj) then
-                                table.remove(objchildren[customproperties.Parent], table.find(objchildren[customproperties.Parent], obj))
-                                table.remove(listindexes[customproperties.Parent], table.find(objchildren[customproperties.Parent], obj))
-                            end
-                        end
-
-                        if table.find(squares, mtobjs[self]) then
-                            table.remove(squares, table.find(squares, mtobjs[self]))
-                        end
-                        
-                        for _, object in next, objchildren[self] do
-                            if objexists[object] then
-                                table.remove(objsignals, table.find(objsignals, object))
-                                objmts[object]:Remove()
-                            end
-                        end
-
-                        table.remove(objsignals, table.find(objsignals, obj))
-                        obj:Remove()
-                    end
-                end
-
-                if signalnames[k] then
-                    objsignals[obj] = objsignals[obj] or {}
-                    
-                    if not objsignals[obj][k] then
-                        objsignals[obj][k] = signalnames[k]
-                    end
-
-                    objsignals[obj].inputbegan = objsignals[obj].inputbegan or {}
-                    objsignals[obj].mouseentered = objsignals[obj].mouseentered or {}
-                    objsignals[obj].mouse1down = objsignals[obj].mouse1down or {}
-
-                    return signalnames[k]
-                end
-
-                return customproperties[k] or obj[k]
-            end,
-
-            __newindex = function(self, k, v)
-                local changechildrenvis
-                changechildrenvis = function(parent, vis)
-                    if objchildren[parent] then
-                        for _, object in next, objchildren[parent] do
-                            if (custompropertygets[mtobjs[parent]]("ClipsDescendants") and not istouching(object.Position, object.Size, mtobjs[parent].Position, mtobjs[parent].Size)) then
-                                object.Visible = false
-                                changechildrenvis(objmts[object], false)
-                            else
-                                object.Visible = vis and objvisibles[object] or false
-                                changechildrenvis(objmts[object], vis and objvisibles[object] or false)
-                            end
-                        end
-                    end
-                end
-
-                childrenvisupdates[self] = changechildrenvis
-
-                if k == "Visible" then
-                    objvisibles[obj] = v
-
-                    if customproperties.Parent and (not mtobjs[customproperties.Parent].Visible or (custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") and not istouching(obj.Position, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size))) then
-                        v = false
-                    end
-
-                    changechildrenvis(self, v)
-                end
-
-                if k == "ClipsDescendants" then
-                    customproperties.ClipsDescendants = v
-
-                    for _, object in next, objchildren[self] do
-                        object.Visible = v and (istouching(object.Position, object.Size, obj.Position, obj.Size) and objvisibles[object] or false) or objvisibles[object]
-                    end
-
-                    return
-                end
-
-                local changechildrenpos
-                changechildrenpos = function(parent, val)
-                    if objchildren[parent] then
-                        if listobjs[parent] then
-                            for i, object in next, objchildren[parent] do
-                                local newpos = val + Vector2.new(0, listindexes[parent][i])
-        
-                                if scrollobjs[parent] then
-                                    newpos = val + Vector2.new(0, listindexes[parent][i] + scrollpositions[parent])
-                                end
-
-                                newpos = Vector2.new(math.floor(newpos.X), math.floor(newpos.Y))
-
-                                object.Position = newpos
-                                custompropertysets[object]("AbsolutePosition", newpos)
-
-                                changechildrenpos(objmts[object], newpos)
-                            end
-                        else
-                            for _, object in next, objchildren[parent] do
-                                local newpos = val + objpositions[object]
-                                newpos = Vector2.new(math.floor(newpos.X), math.floor(newpos.Y))
-
-                                object.Position = newpos
-
-                                custompropertysets[object]("AbsolutePosition", newpos)
-                                
-                                changechildrenpos(objmts[object], newpos)
-                            end
-                        end
-                    end
-                end
-
-                childrenposupdates[self] = changechildrenpos
-
-                if k == "Position" then
-                    if typeof(v) == "UDim2" then
-                        udim2posobjs[obj] = v
-                        
-                        if customproperties.Parent then
-                            objpositions[obj] = udim2tovector2(v, mtobjs[customproperties.Parent].Size)
-
-                            if listobjs[customproperties.Parent] then
-                                return
-                            else
-                                v = mtobjs[customproperties.Parent].Position + udim2tovector2(v, mtobjs[customproperties.Parent].Size)
-                            end
-                        else
-                            local newpos = udim2tovector2(v, workspace.CurrentCamera.ViewportSize)
-                            objpositions[obj] = newpos
-                            v = newpos
-                        end
-
-                        customproperties.AbsolutePosition = v
-
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            obj.Visible = istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false
-                            changechildrenvis(self, istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false)
-                        end
-
-                        changechildrenpos(self, v)
-                    else
-                        objpositions[obj] = v
-
-                        if customproperties.Parent then
-                            if listobjs[customproperties.Parent] then
-                                return
-                            else
-                                v = mtobjs[customproperties.Parent].Position + v
-                            end
-                        end
-
-                        customproperties.AbsolutePosition = v
-
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            obj.Visible = istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false
-                            changechildrenvis(self, istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false)
-                        end
-
-                        changechildrenpos(self, v)
-                    end
-                end
-
-                local changechildrenudim2pos
-                changechildrenudim2pos = function(parent, val)
-                    if objchildren[parent] and not listobjs[parent] then
-                        for _, object in next, objchildren[parent] do
-                            if udim2posobjs[object] then
-                                local newpos = mtobjs[parent].Position + udim2tovector2(udim2posobjs[object], val)
-                                newpos = Vector2.new(math.floor(newpos.X), math.floor(newpos.Y))
-                                
-                                object.Position = newpos
-
-                                custompropertysets[object]("AbsolutePosition", newpos)
-                                objpositions[object] = udim2tovector2(udim2posobjs[object], val)
-                                changechildrenpos(objmts[object], newpos)
-                            end
-                        end
-                    end
-                end
-
-                local changechildrenudim2size
-                changechildrenudim2size = function(parent, val)
-                    if objchildren[parent] then
-                        for _, object in next, objchildren[parent] do
-                            if udim2sizeobjs[object] then
-                                local newsize = udim2tovector2(udim2sizeobjs[object], val)
-                                object.Size = newsize
-
-                                if custompropertygets[mtobjs[parent]]("ClipsDescendants") then
-                                    object.Visible = istouching(object.Position, object.Size, mtobjs[parent].Position, mtobjs[parent].Size) and objvisibles[object] or false
-                                end
-
-                                custompropertysets[object]("AbsoluteSize", newsize)
-
-                                changechildrenudim2size(objmts[object], newsize)
-                                changechildrenudim2pos(objmts[object], newsize)
-                            end
-                        end
-                    end
-                end
-
-                if k == "Size" then
-                    if typeof(v) == "UDim2" then
-                        udim2sizeobjs[obj] = v 
-
-                        if customproperties.Parent then
-                            v = udim2tovector2(v, mtobjs[customproperties.Parent].Size)
-                        else
-                            v = udim2tovector2(v, workspace.CurrentCamera.ViewportSize)
-                        end
-
-                        if customproperties.Parent and listobjs[customproperties.Parent] then
-                            local oldsize = obj.Size.Y
-                            local sizediff = v.Y - oldsize
-
-                            local objindex = table.find(objchildren[customproperties.Parent], obj)
-
-                            listcontents[customproperties.Parent] = listcontents[customproperties.Parent] + sizediff
-                            listadds[customproperties.Parent][obj] = listadds[customproperties.Parent][obj] + sizediff
-
-                            for i, object in next, objchildren[customproperties.Parent] do
-                                if i > objindex then
-                                    object.Position = object.Position + Vector2.new(0, sizediff)
-                                    listindexes[customproperties.Parent][i] = listindexes[customproperties.Parent][i] + sizediff
-                                end
-                            end
-                        end
-
-                        customproperties.AbsoluteSize = v
-
-                        changechildrenudim2size(self, v)
-                        changechildrenudim2pos(self, v)
-
-                        if customproperties.ClipsDescendants then
-                            for _, object in next, objchildren[self] do
-                                object.Visible = istouching(object.Position, object.Size, obj.Position, v) and objvisibles[object] or false
-                            end
-                        end
-
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            local parent = mtobjs[customproperties.Parent]
-                        
-                            local visible = parent.Visible
-                                and objvisibles[obj]
-                                and istouching(obj.Position, v, parent.Position, parent.Size)
-                                or false
-                        
-                            obj.Visible = visible
-                            changechildrenvis(self, visible)
-                        end
-                    else
-                        if customproperties.Parent and listobjs[customproperties.Parent] then
-                            local oldsize = obj.Size.Y
-                            local sizediff = v.Y - oldsize
-
-                            local objindex = table.find(objchildren[customproperties.Parent], obj)
-
-                            listcontents[customproperties.Parent] = listcontents[customproperties.Parent] + sizediff
-                            listadds[customproperties.Parent][obj] = listadds[customproperties.Parent][obj] + sizediff
-
-                            for i, object in next, objchildren[customproperties.Parent] do
-                                if i > objindex then
-                                    object.Position = object.Position + Vector2.new(0, sizediff)
-                                    listcontents[customproperties.Parent] = listcontents[customproperties.Parent] + sizediff
-                                    listindexes[customproperties.Parent][i] = listindexes[customproperties.Parent][i] + sizediff
-                                end
-                            end
-                        end
-
-                        customproperties.AbsoluteSize = v
-
-                        changechildrenudim2size(self, v)
-                        changechildrenudim2pos(self, v)
-
-                        if customproperties.ClipsDescendants then
-                            for _, object in next, objchildren[self] do
-                                object.Visible = istouching(object.Position, object.Size, obj.Position, v) and objvisibles[object] or false
-                            end
-                        end
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            local parent = mtobjs[customproperties.Parent]
-                        
-                            local visible = parent.Visible
-                                and objvisibles[obj]
-                                and istouching(obj.Position, v, parent.Position, parent.Size)
-                                or false
-                        
-                            obj.Visible = visible
-                            changechildrenvis(self, visible)
-                        end
-                    end
-
-                    if typeof(v) == "Vector2" then
-                        v = Vector2.new(math.floor(v.X), math.floor(v.Y))
-                    end
-                end
-
-                if k == "Parent" then
-                    assert(type(v) == "table", "Invalid type " .. type(v) .. " for parent")
-
-                    table.insert(objchildren[v], obj)
-                    table.insert(objmtchildren[v], self)
-
-                    changechildrenvis(v, mtobjs[v].Visible)
-
-                    if udim2sizeobjs[obj] then
-                        local newsize = udim2tovector2(udim2sizeobjs[obj], mtobjs[v].Size)
-                        obj.Size = newsize
-
-                        if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                            obj.Visible = istouching(obj.Position, newsize, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                        end
-
-                        changechildrenudim2pos(self, newsize)
-                    end
-
-                    if listobjs[v] then
-                        table.insert(listchildren[v], obj)
-                        table.insert(listindexes[v], listcontents[v] + (#listchildren[v] == 1 and 0 or objpaddings[v]))
-
-                        local newpos = Vector2.new(0, listcontents[v] + (#listchildren[v] == 1 and 0 or objpaddings[v]))
-
-                        if scrollobjs[v] then
-                            newpos = Vector2.new(0, listcontents[v] + (#listchildren[v] == 1 and 0 or objpaddings[v]) + scrollpositions[v])
-                        end
-
-                        listadds[v][obj] = obj.Size.Y + (#listchildren[v] == 1 and 0 or objpaddings[v])
-
-                        listcontents[v] = listcontents[v] + obj.Size.Y + (#listchildren[v] == 1 and 0 or objpaddings[v])
-
-                        obj.Position = newpos
-
-                        customproperties.AbsolutePosition = newpos
-
-                        changechildrenpos(self, newpos)
-                    end
-
-                    if udim2posobjs[obj] then
-                        local newpos = mtobjs[v].Position + udim2tovector2(udim2posobjs[obj], mtobjs[v].Size)
-                        objpositions[obj] = udim2tovector2(udim2posobjs[obj], mtobjs[v].Size)
-                        obj.Position = newpos
-                        customproperties.AbsolutePosition = newpos
-
-                        if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                            obj.Visible = istouching(newpos, obj.Size, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                        end
-
-                        changechildrenpos(self, newpos)
-                    elseif shape ~= "Line" and shape ~= "Quad" and shape ~= "Triangle" then
-                        local newpos = mtobjs[v].Position + obj.Position
-                        obj.Position = newpos
-                        customproperties.AbsolutePosition = newpos
-
-                        if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                            obj.Visible = istouching(newpos, obj.Size, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                        end
-
-                        changechildrenpos(self, newpos)
-                    end
-
-                    customproperties.Parent = v
-                    self.Visible = objvisibles[obj]
-                    return
-                end
-
-                obj[k] = v
-            end
-        })
-
-        objmts[obj] = mt
-        mtobjs[mt] = obj
-        objchildren[mt] = {}
-        objmtchildren[mt] = {}
-
-        if shape ~= "Line" and shape ~= "Quad" and shape ~= "Triangle" then
-            mt.Position = Vector2.new(0, 0)
-        end
-
-        mt.Visible = true
-
-        return mt
+        updateLayout(state)
+        return wrapper
     end
-end
 
+    -- Add this once in each tab's setup, using that tab's two fixed-size Square
+    -- viewports. Existing list padding is preserved; otherwise padding is zero.
+    -- drawing:MakeTabScrollable(leftColumn, rightColumn) -- optional step: 32px
+    function drawing:MakeTabScrollable(leftColumn, rightColumn, scrollStep)
+        local left = requireState(leftColumn)
+        local right = requireState(rightColumn)
+
+        assert(left ~= right, "Left and right tab columns must be different objects")
+        assert(left.shape == "Square" and right.shape == "Square", "Tab columns must be Square wrappers")
+
+        if scrollStep == nil then
+            scrollStep = 32
+        end
+        assert(type(scrollStep) == "number" and scrollStep > 0 and scrollStep < math.huge,
+            "Tab scroll step must be a finite positive number")
+
+        local ancestor = left.parent
+        while ancestor do
+            assert(ancestor ~= right, "Tab columns must not be nested inside each other")
+            ancestor = ancestor.parent
+        end
+
+        ancestor = right.parent
+        while ancestor do
+            assert(ancestor ~= left, "Tab columns must not be nested inside each other")
+            ancestor = ancestor.parent
+        end
+
+        local existingGroup = left.scrollGroup
+        if existingGroup and right.scrollGroup == existingGroup and #existingGroup.members == 2 then
+            existingGroup.step = scrollStep
+            return leftColumn, rightColumn
+        end
+
+        local previousLeftGroup = unlinkScrollGroup(left)
+        local previousRightGroup = unlinkScrollGroup(right)
+
+        if previousLeftGroup then
+            refreshScrollGroup(previousLeftGroup)
+        end
+        if previousRightGroup and previousRightGroup ~= previousLeftGroup then
+            refreshScrollGroup(previousRightGroup)
+        end
+
+        local members = {left, right}
+        for i = 1, #members do
+            local member = members[i]
+
+            if not member.list then
+                member.list = true
+                member.padding = 0
+            end
+
+            member.scrollRequested = true
+            member.clipsDescendants = true
+
+            if member.scrollable then
+                updateLayout(member)
+            else
+                enableScrolling(member)
+            end
+        end
+
+        local group = {
+            members = members,
+            offset = max(left.scrollOffset, right.scrollOffset),
+            step = scrollStep
+        }
+
+        left.scrollGroup = group
+        right.scrollGroup = group
+        refreshScrollGroup(group)
+
+        return leftColumn, rightColumn
+    end
+
+    local function isMouseOver(state, x, y)
+        local position = state.absolutePosition
+        local size = state.absoluteSize
+        return x >= position.X and y >= position.Y
+            and x <= position.X + size.X and y <= position.Y + size.Y
+    end
+
+    local function captureInput(checkZIndex, registry)
+        registry = registry or inputStates
+        if not next(registry) then
+            return nil
+        end
+
+        -- Sample the mouse once and scan blocking squares once per input event.
+        local mouse = UserInputService:GetMouseLocation()
+        local x, y = mouse.X, mouse.Y
+        local highestZIndex = -math.huge
+
+        if checkZIndex then
+            for i = 1, #squares do
+                local state = squares[i]
+                if state.effectiveVisible and isMouseOver(state, x, y) then
+                    highestZIndex = max(highestZIndex, state.object.ZIndex)
+                end
+            end
+        end
+
+        -- A snapshot tolerates callbacks creating/removing wrappers during
+        -- dispatch. A nested input event gets its own independent snapshot.
+        local snapshot = {}
+        for state in next, registry do
+            if state.alive then
+                snapshot[#snapshot + 1] = state
+            end
+        end
+
+        return snapshot, x, y, highestZIndex
+    end
+
+    local function fireSignal(state, name, ...)
+        if not state.alive then
+            return
+        end
+
+        local signals = state.signals
+        local signal = signals and signals[name]
+        if signal then
+            signal:Fire(...)
+        end
+    end
+
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        local snapshot, x, y, highestZIndex = captureInput(true)
+        if not snapshot then
+            return
+        end
+
+        local inputType = input.UserInputType
+
+        for i = 1, #snapshot do
+            local state = snapshot[i]
+            if state.alive and state.effectiveVisible and isMouseOver(state, x, y)
+                and state.object.ZIndex >= highestZIndex then
+                state.inputBegan[input] = true
+
+                if inputType == MouseButton1 then
+                    state.mouse1Input = input
+                elseif inputType == MouseButton2 then
+                    state.mouse2Input = input
+                end
+
+                fireSignal(state, "InputBegan", input, gpe)
+
+                if inputType == MouseButton1 then
+                    fireSignal(state, "MouseButton1Down")
+                elseif inputType == MouseButton2 then
+                    fireSignal(state, "MouseButton2Down")
+                end
+            end
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input, gpe)
+        local inputType = input.UserInputType
+        local isMouseButton = inputType == MouseButton1 or inputType == MouseButton2
+        local snapshot, x, y, highestZIndex = captureInput(isMouseButton)
+        if not snapshot then
+            return
+        end
+
+        for i = 1, #snapshot do
+            local state = snapshot[i]
+            if state.alive then
+                local beganHere = state.inputBegan[input]
+                local clicked = false
+                state.inputBegan[input] = nil
+
+                -- Always clear the press, including releases outside the object.
+                if inputType == MouseButton1 then
+                    clicked = state.mouse1Input == input
+                    state.mouse1Input = nil
+                elseif inputType == MouseButton2 then
+                    clicked = state.mouse2Input == input
+                    state.mouse2Input = nil
+                end
+
+                if beganHere then
+                    fireSignal(state, "InputEnded", input, gpe)
+                end
+
+                if isMouseButton and state.alive and state.effectiveVisible
+                    and isMouseOver(state, x, y) and state.object.ZIndex >= highestZIndex then
+                    if inputType == MouseButton1 then
+                        fireSignal(state, "MouseButton1Up")
+                        if clicked then
+                            fireSignal(state, "MouseButton1Click")
+                        end
+                    else
+                        fireSignal(state, "MouseButton2Up")
+                        if clicked then
+                            fireSignal(state, "MouseButton2Click")
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input, gpe)
+        local snapshot, x, y = captureInput(false, changedInputStates)
+        if not snapshot then
+            return
+        end
+
+        local inputType = input.UserInputType
+        local wheelTarget
+
+        -- Route each wheel event once. Scrolling either column updates its
+        -- group, including when both columns touch at the mouse's position.
+        if inputType == MouseWheel then
+            local highestZIndex = -math.huge
+
+            for i = 1, #snapshot do
+                local state = snapshot[i]
+                if state.alive and state.scrollable and state.effectiveVisible and isMouseOver(state, x, y) then
+                    local zIndex = state.object.ZIndex
+                    local preferred = not wheelTarget or zIndex > highestZIndex
+
+                    if wheelTarget and zIndex == highestZIndex then
+                        local ancestor = state.parent
+                        while ancestor do
+                            if ancestor == wheelTarget then
+                                preferred = true
+                                break
+                            end
+                            ancestor = ancestor.parent
+                        end
+                    end
+
+                    if preferred then
+                        wheelTarget = state
+                        highestZIndex = zIndex
+                    end
+                end
+            end
+        end
+
+        for i = 1, #snapshot do
+            local state = snapshot[i]
+            if state.alive then
+                local over = state.effectiveVisible and isMouseOver(state, x, y)
+
+                if over then
+                    if not state.mouseEntered then
+                        state.mouseEntered = true
+                        fireSignal(state, "MouseEnter", input.Position)
+                    end
+
+                    if inputType == MouseMovement then
+                        fireSignal(state, "MouseMoved", input.Position)
+                    elseif inputType == MouseWheel and state.alive and state == wheelTarget then
+                        local delta = input.Position.Z
+                        if delta ~= 0 then
+                            scroll(state, delta > 0 and -1 or 1)
+                        end
+                    end
+
+                    fireSignal(state, "InputChanged", input, gpe)
+                elseif state.mouseEntered then
+                    state.mouseEntered = false
+                    fireSignal(state, "MouseLeave", input.Position)
+                end
+            end
+        end
+    end)
+end
 
 -- // UI LIBRARY
 
@@ -3196,7 +3504,7 @@ function library:Load(loadoptions)
         })
 
         column1:AddListLayout(12)
-        column1:MakeScrollable()
+        -- column1:MakeScrollable()
 
         local column2 = utility.create("Square", {
             Transparency = 0,
@@ -3206,7 +3514,9 @@ function library:Load(loadoptions)
         })
 
         column2:AddListLayout(12)
-        column2:MakeScrollable()
+        -- column2:MakeScrollable()
+
+        drawing:MakeTabScrollable(column1, column2, 32)
 
         local tabmouseover = false
 
