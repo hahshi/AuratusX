@@ -252,330 +252,16 @@ do
         end
     end)
 
-    function drawing:new(shape)
-        -- Shared by every object created through this constructor.
-        local states = rawget(drawing, "_drawingStates")
-    
-        if not states then
-            states = {}
-            rawset(drawing, "_drawingStates", states)
-        end
-    
-        local function vector(value, reference)
-            if typeof(value) == "UDim2" then
-                return udim2tovector2(value, reference)
-            end
-    
-            return value
-        end
-    
-        local function rectangle(position, size)
-            return {
-                left = position.X,
-                top = position.Y,
-                right = position.X + size.X,
-                bottom = position.Y + size.Y
-            }
-        end
-    
-        local function intersect(a, b)
-            if not a then
-                return b
-            end
-    
-            return {
-                left = math.max(a.left, b.left),
-                top = math.max(a.top, b.top),
-                right = math.min(a.right, b.right),
-                bottom = math.min(a.bottom, b.bottom)
-            }
-        end
-    
-        local function nonempty(rect)
-            return rect
-                and rect.right > rect.left
-                and rect.bottom > rect.top
-        end
-    
-        local function contains(outer, inner)
-            if not outer then
-                return true
-            end
-    
-            return nonempty(outer)
-                and inner.left >= outer.left
-                and inner.top >= outer.top
-                and inner.right <= outer.right
-                and inner.bottom <= outer.bottom
-        end
-    
-        local function pointerinside(rect, point)
-            return nonempty(rect)
-                and point.X >= rect.left
-                and point.Y >= rect.top
-                and point.X < rect.right
-                and point.Y < rect.bottom
-        end
-    
-        local function erase(array, value)
-            local index = table.find(array, value)
-    
-            if index then
-                table.remove(array, index)
-            end
-        end
-    
-        -- Measure logical sizes before applying any clipping.
-        local function measure(node, parentSize)
-            local state = states[node]
-            local object = state.object
-    
-            if state.rectangular then
-                local size = vector(state.size, parentSize)
-    
-                state.absoluteSize = Vector2.new(
-                    math.max(0, math.floor(size.X)),
-                    math.max(0, math.floor(size.Y))
-                )
-            elseif state.shape == "Text" then
-                state.absoluteSize = object.TextBounds
-            elseif state.shape == "Circle" then
-                local diameter = object.Radius * 2
-                state.absoluteSize = Vector2.new(diameter, diameter)
-            else
-                state.absoluteSize = Vector2.new(0, 0)
-            end
-    
-            local total = 0
-    
-            for index, child in ipairs(state.children) do
-                measure(child, state.absoluteSize)
-    
-                if state.list then
-                    if index > 1 then
-                        total = total + state.padding
-                    end
-    
-                    total = total + states[child].absoluteSize.Y
-                end
-            end
-    
-            state.contentSize = total
-            state.maximum = math.max(0, total - state.absoluteSize.Y)
-    
-            if state.scrollable then
-                state.offset = math.clamp(
-                    state.offset,
-                    0,
-                    state.maximum
-                )
-            else
-                state.offset = 0
-            end
-        end
-    
-        -- Position using logical geometry; clip only the native drawing.
-        local function place(
-            node,
-            position,
-            parentVisible,
-            inheritedClip,
-            parentLayer,
-            depth
-        )
-            local state = states[node]
-            local object = state.object
-    
-            position = Vector2.new(
-                math.floor(position.X),
-                math.floor(position.Y)
-            )
-    
-            state.absolutePosition = position
-            state.effectiveVisible = parentVisible and state.visible
-            state.layer = math.max(parentLayer, object.ZIndex)
-            state.depth = depth
-    
-            local bounds = rectangle(position, state.absoluteSize)
-            state.hitRect = intersect(inheritedClip, bounds)
-    
-            if state.rectangular then
-                -- Restore logical geometry before calculating this frame's crop.
-                object.Position = position
-                object.Size = state.absoluteSize
-    
-                if state.shape == "Square" then
-                    local cropped = state.hitRect
-    
-                    if inheritedClip
-                        and (object.Filled or object.Transparency == 0) then
-    
-                        object.Position = Vector2.new(
-                            cropped.left,
-                            cropped.top
-                        )
-    
-                        object.Size = Vector2.new(
-                            math.max(0, cropped.right - cropped.left),
-                            math.max(0, cropped.bottom - cropped.top)
-                        )
-    
-                        object.Visible = state.effectiveVisible
-                            and nonempty(cropped)
-                    else
-                        -- Cropping an unfilled square would invent new borders.
-                        object.Visible = state.effectiveVisible
-                            and nonempty(bounds)
-                            and contains(inheritedClip, bounds)
-                    end
-                else
-                    -- Drawing images do not expose a texture crop rectangle.
-                    object.Visible = state.effectiveVisible
-                        and nonempty(bounds)
-                        and contains(inheritedClip, bounds)
-                end
-            elseif state.shape == "Text" then
-                object.Position = position
-    
-                local textSize = object.TextBounds
-                local left = position.X
-    
-                if object.Center then
-                    left = left - textSize.X / 2
-                end
-    
-                local outline = object.Outline and 1 or 0
-    
-                local textBounds = {
-                    left = left - outline,
-                    top = position.Y - outline,
-                    right = left + textSize.X + outline,
-                    bottom = position.Y + textSize.Y + outline
-                }
-    
-                object.Visible = state.effectiveVisible
-                    and contains(inheritedClip, textBounds)
-            elseif state.shape == "Circle" then
-                object.Position = position
-    
-                local radius = object.Radius
-    
-                local circleBounds = {
-                    left = position.X - radius,
-                    top = position.Y - radius,
-                    right = position.X + radius,
-                    bottom = position.Y + radius
-                }
-    
-                object.Visible = state.effectiveVisible
-                    and contains(inheritedClip, circleBounds)
-            else
-                -- Line, Triangle and Quad points remain absolute.
-                local points = {object.PointA, object.PointB}
-    
-                if state.shape ~= "Line" then
-                    table.insert(points, object.PointC)
-                end
-    
-                if state.shape == "Quad" then
-                    table.insert(points, object.PointD)
-                end
-    
-                local pointBounds = {
-                    left = math.huge,
-                    top = math.huge,
-                    right = -math.huge,
-                    bottom = -math.huge
-                }
-    
-                for _, point in ipairs(points) do
-                    pointBounds.left = math.min(pointBounds.left, point.X)
-                    pointBounds.top = math.min(pointBounds.top, point.Y)
-                    pointBounds.right = math.max(pointBounds.right, point.X)
-                    pointBounds.bottom = math.max(pointBounds.bottom, point.Y)
-                end
-    
-                object.Visible = state.effectiveVisible
-                    and contains(inheritedClip, pointBounds)
-            end
-    
-            local childClip = inheritedClip
-    
-            if state.properties.ClipsDescendants then
-                childClip = intersect(inheritedClip, bounds)
-            end
-    
-            local cursor = 0
-    
-            for index, child in ipairs(state.children) do
-                local childState = states[child]
-                local childPosition
-    
-                if state.list then
-                    if index > 1 then
-                        cursor = cursor + state.padding
-                    end
-    
-                    childPosition = position + Vector2.new(
-                        0,
-                        cursor - state.offset
-                    )
-    
-                    cursor = cursor + childState.absoluteSize.Y
-                else
-                    childPosition = position + vector(
-                        childState.position,
-                        state.absoluteSize
-                    )
-                end
-    
-                -- Propagate logical visibility, not the cropped parent's
-                -- native Visible value. A tall section must not hide its children.
-                place(
-                    child,
-                    childPosition,
-                    state.effectiveVisible,
-                    childClip,
-                    state.layer,
-                    depth + 1
-                )
-            end
-        end
-    
-        local function refresh(node)
-            if not states[node] then
-                return
-            end
-    
-            local root = node
-    
-            while states[root].parent do
-                root = states[root].parent
-            end
-    
-            local camera = workspace.CurrentCamera
-            local viewport = camera
-                and camera.ViewportSize
-                or Vector2.new(0, 0)
-    
-            measure(root, viewport)
-    
-            place(
-                root,
-                vector(states[root].position, viewport),
-                true,
-                nil,
-                -math.huge,
-                0
-            )
-        end
-    
-        local object = Drawing.new(shape)
-    
-        local rectangular = shape == "Square" or shape == "Image"
-        local methods = {}
-    
-        local signalNames = {
+    -- Place this inside the existing drawing API's do ... end block,
+    -- replacing the previous drawing:new() function.
+
+    local drawingBackend = {
+        states = {},
+        pending = {},
+        scrollables = {},
+        methods = {},
+
+        signalNames = {
             MouseButton1Click = true,
             MouseButton1Up = true,
             MouseButton1Down = true,
@@ -589,375 +275,1029 @@ do
             MouseLeave = true,
             MouseMoved = true
         }
-    
+    }
+
+    local B = drawingBackend
+
+    function B.viewport()
+        local camera = workspace.CurrentCamera
+
+        return camera
+            and camera.ViewportSize
+            or Vector2.new(0, 0)
+    end
+
+    function B.vector(value, reference)
+        if typeof(value) == "UDim2" then
+            return udim2tovector2(value, reference)
+        end
+
+        return value
+    end
+
+    function B.rect(position, size)
+        return {
+            left = position.X,
+            top = position.Y,
+            right = position.X + size.X,
+            bottom = position.Y + size.Y
+        }
+    end
+
+    function B.intersect(a, b)
+        if not a then
+            return b
+        end
+
+        return {
+            left = math.max(a.left, b.left),
+            top = math.max(a.top, b.top),
+            right = math.min(a.right, b.right),
+            bottom = math.min(a.bottom, b.bottom)
+        }
+    end
+
+    function B.sameRect(a, b)
+        if a == b then
+            return true
+        end
+
+        return a ~= nil
+            and b ~= nil
+            and a.left == b.left
+            and a.top == b.top
+            and a.right == b.right
+            and a.bottom == b.bottom
+    end
+
+    function B.nonempty(rect)
+        return rect ~= nil
+            and rect.right > rect.left
+            and rect.bottom > rect.top
+    end
+
+    function B.contains(outer, inner)
+        if not outer then
+            return true
+        end
+
+        return B.nonempty(outer)
+            and inner.left >= outer.left
+            and inner.top >= outer.top
+            and inner.right <= outer.right
+            and inner.bottom <= outer.bottom
+    end
+
+    function B.pointerInside(rect, point)
+        return B.nonempty(rect)
+            and point.X >= rect.left
+            and point.Y >= rect.top
+            and point.X < rect.right
+            and point.Y < rect.bottom
+    end
+
+    -- Avoid sending unchanged properties to the native drawing object.
+    function B.write(state, key, value)
+        if state.written[key] == value then
+            return false
+        end
+
+        state.object[key] = value
+        state.written[key] = value
+
+        return true
+    end
+
+    -- Mark the path to the root without recalculating the tree.
+    function B.mark(state)
+        local current = state
+
+        while current do
+            current.dirty = true
+
+            local parent = current.parent
+                and B.states[current.parent]
+
+            if not parent then
+                B.pending[current] = true
+                return
+            end
+
+            current = parent
+        end
+    end
+
+    -- Preserve the valid prefix of a list.
+    -- Appending one fixed-height option only measures that new option.
+    function B.invalidateList(state, index)
+        if not state or not state.list then
+            return
+        end
+
+        state.validCount = math.min(
+            state.validCount,
+            math.max(0, index - 1)
+        )
+
+        state.childrenDirty = true
+    end
+
+    function B.invalidateSize(state)
+        state.sizeDirty = true
+
+        local parent = state.parent
+            and B.states[state.parent]
+
+        B.invalidateList(parent, state.index)
+        B.mark(state)
+    end
+
+    function B.size(state)
+        -- Text and point shapes do not depend on their parent's size.
+        if not state.rectangular and not state.sizeDirty then
+            return state.absoluteSize
+        end
+
+        local parent = state.parent
+            and B.states[state.parent]
+
+        local reference = parent
+            and B.size(parent)
+            or B.viewport()
+
+        if not state.sizeDirty
+            and state.parentSize == reference then
+            return state.absoluteSize
+        end
+
+        local previous = state.absoluteSize
+        local size
+
+        if state.rectangular then
+            local requested = B.vector(state.size, reference)
+
+            size = Vector2.new(
+                math.max(0, math.floor(requested.X)),
+                math.max(0, math.floor(requested.Y))
+            )
+        elseif state.shape == "Text" then
+            size = state.object.TextBounds
+        elseif state.shape == "Circle" then
+            local diameter = state.object.Radius * 2
+            size = Vector2.new(diameter, diameter)
+        else
+            size = Vector2.new(0, 0)
+        end
+
+        state.parentSize = reference
+        state.absoluteSize = size
+        state.sizeDirty = false
+
+        if size.Y ~= previous.Y then
+            B.invalidateList(parent, state.index)
+
+            -- A changing viewport height only invalidates row measurements
+            -- when some rows actually use a relative height.
+            if state.list and state.relativeHeightCount > 0 then
+                state.validCount = 0
+                state.childrenDirty = true
+            end
+        end
+
+        return size
+    end
+
+    function B.content(state)
+        B.size(state)
+
+        if not state.list then
+            return 0
+        end
+
+        local count = #state.children
+        local valid = math.min(state.validCount, count)
+        local total = 0
+
+        if valid > 0 then
+            total = B.states[state.children[valid]].endY
+        end
+
+        for index = valid + 1, count do
+            local child = B.states[state.children[index]]
+
+            if index > 1 then
+                total = total + state.padding
+            end
+
+            child.startY = total
+            total = total + B.size(child).Y
+            child.endY = total
+        end
+
+        state.validCount = count
+        state.contentSize = total
+
+        return total
+    end
+
+    function B.metrics(state)
+        local viewport = B.size(state).Y
+        local total = B.content(state)
+        local maximum = math.max(0, total - viewport)
+
+        state.maximum = maximum
+
+        if state.scrollable then
+            state.offset = math.clamp(state.offset, 0, maximum)
+        else
+            state.offset = 0
+        end
+
+        return state.offset, maximum, viewport, total
+    end
+
+    -- Logical positions can be read immediately without rendering the window.
+    function B.position(state)
+        local parent = state.parent
+            and B.states[state.parent]
+
+        local position
+
+        if parent then
+            local parentPosition = B.position(parent)
+            local parentSize = B.size(parent)
+
+            if parent.list then
+                B.metrics(parent)
+
+                position = parentPosition + Vector2.new(
+                    0,
+                    state.startY - parent.offset
+                )
+            else
+                position = parentPosition
+                    + B.vector(state.position, parentSize)
+            end
+        else
+            position = B.vector(state.position, B.viewport())
+        end
+
+        return Vector2.new(
+            math.floor(position.X),
+            math.floor(position.Y)
+        )
+    end
+
+    function B.paint(state, position, size, clip, bounds)
+        local object = state.object
+        local visible = state.effectiveVisible
+        local hitRect = state.hitRect
+
+        if state.rectangular then
+            if state.shape == "Square"
+                and clip
+                and (object.Filled or object.Transparency == 0) then
+
+                B.write(state, "Position", Vector2.new(
+                    hitRect.left,
+                    hitRect.top
+                ))
+
+                B.write(state, "Size", Vector2.new(
+                    math.max(0, hitRect.right - hitRect.left),
+                    math.max(0, hitRect.bottom - hitRect.top)
+                ))
+
+                B.write(
+                    state,
+                    "Visible",
+                    visible and B.nonempty(hitRect)
+                )
+            else
+                B.write(state, "Position", position)
+                B.write(state, "Size", size)
+
+                B.write(
+                    state,
+                    "Visible",
+                    visible
+                        and B.nonempty(bounds)
+                        and B.contains(clip, bounds)
+                )
+            end
+
+            return
+        end
+
+        if state.shape == "Text" then
+            B.write(state, "Position", position)
+
+            local left = position.X
+
+            if object.Center then
+                left = left - size.X / 2
+            end
+
+            local outline = object.Outline and 1 or 0
+
+            local textBounds = {
+                left = left - outline,
+                top = position.Y - outline,
+                right = left + size.X + outline,
+                bottom = position.Y + size.Y + outline
+            }
+
+            B.write(
+                state,
+                "Visible",
+                visible and B.contains(clip, textBounds)
+            )
+
+            return
+        end
+
+        if state.shape == "Circle" then
+            B.write(state, "Position", position)
+
+            local radius = object.Radius
+
+            local circleBounds = {
+                left = position.X - radius,
+                top = position.Y - radius,
+                right = position.X + radius,
+                bottom = position.Y + radius
+            }
+
+            B.write(
+                state,
+                "Visible",
+                visible and B.contains(clip, circleBounds)
+            )
+
+            return
+        end
+
+        -- Point-based drawings retain absolute native coordinates.
+        local points
+
+        if state.shape == "Line" then
+            points = {object.From, object.To}
+        elseif state.shape == "Triangle" then
+            points = {
+                object.PointA,
+                object.PointB,
+                object.PointC
+            }
+        else
+            points = {
+                object.PointA,
+                object.PointB,
+                object.PointC,
+                object.PointD
+            }
+        end
+
+        local pointBounds = {
+            left = math.huge,
+            top = math.huge,
+            right = -math.huge,
+            bottom = -math.huge
+        }
+
+        for _, point in ipairs(points) do
+            pointBounds.left = math.min(pointBounds.left, point.X)
+            pointBounds.top = math.min(pointBounds.top, point.Y)
+            pointBounds.right = math.max(pointBounds.right, point.X)
+            pointBounds.bottom = math.max(pointBounds.bottom, point.Y)
+        end
+
+        B.write(
+            state,
+            "Visible",
+            visible and B.contains(clip, pointBounds)
+        )
+    end
+
+    function B.layout(
+        state,
+        position,
+        parentVisible,
+        clip,
+        parentLayer,
+        depth,
+        force
+    )
+        if not force and not state.dirty then
+            return
+        end
+
+        local size = B.size(state)
+        local visible = parentVisible and state.visible
+        local layer = math.max(parentLayer, state.object.ZIndex)
+
+        local changed = not state.laidOut
+            or state.contextDirty
+            or state.drawPosition ~= position
+            or state.drawSize ~= size
+            or state.effectiveVisible ~= visible
+            or state.layer ~= layer
+            or state.depth ~= depth
+            or not B.sameRect(state.lastClip, clip)
+
+        state.effectiveVisible = visible
+        state.layer = layer
+        state.depth = depth
+
+        if state.list then
+            B.metrics(state)
+        end
+
+        local moveChildren = changed
+            or state.childrenDirty
+            or state.lastOffset ~= state.offset
+
+        if changed or state.paintDirty then
+            local bounds = B.rect(position, size)
+
+            state.hitRect = B.intersect(clip, bounds)
+
+            if state.properties.ClipsDescendants then
+                state.childClip = B.intersect(clip, bounds)
+            else
+                state.childClip = clip
+            end
+
+            B.paint(state, position, size, clip, bounds)
+        end
+
+        for _, childWrapper in ipairs(state.children) do
+            local child = B.states[childWrapper]
+
+            if moveChildren or child.dirty then
+                local childPosition
+
+                if state.list then
+                    childPosition = position + Vector2.new(
+                        0,
+                        child.startY - state.offset
+                    )
+                else
+                    childPosition = position
+                        + B.vector(child.position, size)
+                end
+
+                childPosition = Vector2.new(
+                    math.floor(childPosition.X),
+                    math.floor(childPosition.Y)
+                )
+
+                B.layout(
+                    child,
+                    childPosition,
+                    visible,
+                    state.childClip,
+                    layer,
+                    depth + 1,
+                    moveChildren
+                )
+            end
+        end
+
+        state.drawPosition = position
+        state.drawSize = size
+        state.lastClip = clip
+        state.lastOffset = state.offset
+
+        state.laidOut = true
+        state.dirty = false
+        state.paintDirty = false
+        state.contextDirty = false
+        state.childrenDirty = false
+    end
+
+    function B.flush()
+        if not next(B.pending) then
+            return
+        end
+
+        local pending = B.pending
+        B.pending = {}
+
+        for state in pairs(pending) do
+            if B.states[state.wrapper] == state and not state.parent then
+                B.layout(
+                    state,
+                    B.position(state),
+                    true,
+                    nil,
+                    -math.huge,
+                    0,
+                    false
+                )
+            end
+        end
+    end
+
+    function B.detach(state)
+        local parent = state.parent
+            and B.states[state.parent]
+
+        if not parent then
+            state.parent = nil
+            state.index = 0
+            return
+        end
+
+        local index = state.index
+
+        table.remove(parent.children, index)
+
+        for childIndex = index, #parent.children do
+            B.states[parent.children[childIndex]].index = childIndex
+        end
+
+        if state.scaledHeight then
+            parent.relativeHeightCount =
+                parent.relativeHeightCount - 1
+        end
+
+        state.parent = nil
+        state.index = 0
+
+        B.invalidateList(parent, index)
+        B.mark(parent)
+    end
+
+    function B.setParent(state, parentWrapper)
+        assert(
+            parentWrapper == nil or B.states[parentWrapper] ~= nil,
+            "Parent must be another drawing wrapper"
+        )
+
+        if state.parent == parentWrapper then
+            return
+        end
+
+        local ancestor = parentWrapper
+
+        while ancestor do
+            assert(
+                ancestor ~= state.wrapper,
+                "Cannot parent a drawing to itself or its descendants"
+            )
+
+            ancestor = B.states[ancestor].parent
+        end
+
+        B.detach(state)
+
+        state.parent = parentWrapper
+        state.sizeDirty = true
+        state.contextDirty = true
+
+        if parentWrapper then
+            local parent = B.states[parentWrapper]
+
+            table.insert(parent.children, state.wrapper)
+            state.index = #parent.children
+
+            if state.scaledHeight then
+                parent.relativeHeightCount =
+                    parent.relativeHeightCount + 1
+            end
+
+            B.invalidateList(parent, state.index)
+        end
+
+        B.mark(state)
+    end
+
+    function B.destroy(state)
+        rawset(state.wrapper, "exists", false)
+
+        objexists[state.object] = nil
+        objsignals[state.object] = nil
+        B.scrollables[state] = nil
+
+        while #state.children > 0 do
+            B.destroy(B.states[state.children[#state.children]])
+        end
+
+        B.detach(state)
+
+        for _, signal in pairs(state.signals) do
+            signal:Destroy()
+        end
+
+        if state.shape == "Square" then
+            local index = table.find(squares, state.object)
+
+            if index then
+                table.remove(squares, index)
+            end
+        end
+
+        objmts[state.object] = nil
+        mtobjs[state.wrapper] = nil
+        objvisibles[state.object] = nil
+        objmtchildren[state.wrapper] = nil
+
+        B.pending[state] = nil
+        B.states[state.wrapper] = nil
+
+        state.object:Remove()
+    end
+
+    function B.methods:GetChildren()
+        local state = B.states[self]
+        return state and state.children or {}
+    end
+
+    function B.methods:Remove()
+        local state = B.states[self]
+
+        if state then
+            B.destroy(state)
+        end
+    end
+
+    function B.methods:AddListLayout(padding)
+        local state = B.states[self]
+
+        assert(state.shape == "Square", "List layouts require a Square")
+
+        state.list = true
+        state.padding = math.max(0, tonumber(padding) or 0)
+        state.validCount = 0
+        state.childrenDirty = true
+
+        B.mark(state)
+
+        return self
+    end
+
+    function B.methods:MakeScrollable()
+        local state = B.states[self]
+
+        assert(state.shape == "Square", "Scrolling requires a Square")
+
+        state.scrollable = true
+        state.properties.ClipsDescendants = true
+        state.contextDirty = true
+
+        B.scrollables[state] = true
+        B.mark(state)
+
+        return self
+    end
+
+    function B.methods:Scroll(direction)
+        local state = B.states[self]
+        direction = tonumber(direction) or 0
+
+        if not state or not state.scrollable or direction == 0 then
+            return false
+        end
+
+        B.metrics(state)
+
+        local step = state.properties.ScrollStep
+        local index = state.offset / step
+        local nextOffset
+
+        if direction > 0 then
+            nextOffset = (math.floor(index + 0.000001) + 1) * step
+        else
+            nextOffset = (math.ceil(index - 0.000001) - 1) * step
+        end
+
+        nextOffset = math.clamp(nextOffset, 0, state.maximum)
+
+        if math.abs(nextOffset - state.offset) < 0.000001 then
+            return false
+        end
+
+        state.offset = nextOffset
+        state.childrenDirty = true
+
+        B.mark(state)
+
+        return true
+    end
+
+    function B.methods:GetScrollState()
+        return B.metrics(B.states[self])
+    end
+
+    function B.methods:RefreshScrolling()
+        local state = B.states[self]
+
+        state.offset = 0
+        state.childrenDirty = true
+
+        B.mark(state)
+    end
+
+    B.metatable = {
+        __index = function(self, key)
+            local method = B.methods[key]
+
+            if method then
+                return method
+            end
+
+            local state = B.states[self]
+
+            if not state then
+                return nil
+            end
+
+            if key == "Parent" then
+                return state.parent
+            elseif key == "Visible" then
+                return state.visible
+            elseif key == "Position" then
+                return state.position
+            elseif key == "Size" and state.rectangular then
+                return state.size
+            elseif key == "AbsolutePosition" then
+                return B.position(state)
+            elseif key == "AbsoluteSize" then
+                return B.size(state)
+            elseif key == "AbsoluteContentSize" then
+                return B.content(state)
+            end
+
+            if state.shape == "Square" and B.signalNames[key] then
+                if not state.signals[key] then
+                    state.signals[key] = Signal.new()
+
+                    objsignals[state.object] = objsignals[state.object] or {
+                        inputbegan = {},
+                        mouseentered = false,
+                        mouse1down = false
+                    }
+
+                    objsignals[state.object][key] = state.signals[key]
+                end
+
+                return state.signals[key]
+            end
+
+            local property = state.properties[key]
+
+            if property ~= nil then
+                return property
+            end
+
+            return state.object[key]
+        end,
+
+        __newindex = function(self, key, value)
+            local state = B.states[self]
+
+            if not state then
+                return
+            end
+
+            if key == "Parent" then
+                B.setParent(state, value)
+                return
+            end
+
+            if key == "Visible" then
+                value = not not value
+
+                if state.visible ~= value then
+                    state.visible = value
+                    objvisibles[state.object] = value
+                    B.mark(state)
+                end
+
+                return
+            end
+
+            if key == "Position" then
+                assert(
+                    typeof(value) == "Vector2" or typeof(value) == "UDim2",
+                    "Position must be Vector2 or UDim2"
+                )
+
+                if state.position ~= value then
+                    state.position = value
+                    B.mark(state)
+                end
+
+                return
+            end
+
+            if key == "Size" and state.rectangular then
+                assert(
+                    typeof(value) == "Vector2" or typeof(value) == "UDim2",
+                    "Size must be Vector2 or UDim2"
+                )
+
+                if state.size == value then
+                    return
+                end
+
+                local scaledHeight = typeof(value) == "UDim2"
+                    and value.Y.Scale ~= 0
+
+                local parent = state.parent
+                    and B.states[state.parent]
+
+                if parent and scaledHeight ~= state.scaledHeight then
+                    parent.relativeHeightCount =
+                        parent.relativeHeightCount
+                        + (scaledHeight and 1 or -1)
+                end
+
+                state.scaledHeight = scaledHeight
+                state.size = value
+
+                B.invalidateSize(state)
+                return
+            end
+
+            if key == "ClipsDescendants" then
+                value = not not value
+
+                if state.properties.ClipsDescendants ~= value then
+                    state.properties.ClipsDescendants = value
+                    state.contextDirty = true
+                    B.mark(state)
+                end
+
+                return
+            end
+
+            if key == "ScrollStep" then
+                state.properties.ScrollStep =
+                    math.max(1, tonumber(value) or 32)
+
+                return
+            end
+
+            if not B.write(state, key, value) then
+                return
+            end
+
+            if key == "Text"
+                or key == "Font"
+                or key == "Size"
+                or key == "Radius" then
+
+                B.invalidateSize(state)
+            elseif key == "ZIndex" then
+                state.contextDirty = true
+                B.mark(state)
+            elseif key == "Center"
+                or key == "Outline"
+                or key == "Filled"
+                or key == "Transparency"
+                or key == "Thickness"
+                or key == "From"
+                or key == "To"
+                or key == "PointA"
+                or key == "PointB"
+                or key == "PointC"
+                or key == "PointD" then
+
+                state.paintDirty = true
+                B.mark(state)
+            end
+
+            -- Color, image Data and other appearance-only properties
+            -- were already written directly. They need no layout pass.
+        end
+    }
+
+    function drawing:new(shape)
+        local object = Drawing.new(shape)
+        local rectangular = shape == "Square" or shape == "Image"
+        local wrapper = setmetatable({exists = true}, B.metatable)
+
         local state = {
+            wrapper = wrapper,
             object = object,
             shape = shape,
             rectangular = rectangular,
-    
+
+            parent = nil,
+            index = 0,
+            children = {},
+
             position = Vector2.new(0, 0),
             size = rectangular and object.Size or nil,
-    
-            absolutePosition = Vector2.new(0, 0),
             absoluteSize = Vector2.new(0, 0),
-    
-            parent = nil,
-            children = {},
+
             visible = true,
-            effectiveVisible = true,
-    
+            effectiveVisible = false,
+
             list = false,
             padding = 0,
+            validCount = 0,
             contentSize = 0,
-    
+
+            startY = 0,
+            endY = 0,
+
+            scaledHeight = false,
+            relativeHeightCount = 0,
+
             scrollable = false,
             offset = 0,
             maximum = 0,
-    
+
+            sizeDirty = true,
+            paintDirty = true,
+            contextDirty = true,
+            childrenDirty = true,
+            dirty = true,
+            laidOut = false,
+
             signals = {},
-    
+            written = {},
+
             properties = {
                 ClipsDescendants = false,
                 ScrollStep = 32
             }
         }
-    
-        function methods:GetChildren()
-            return states[self].children
-        end
-    
-        function methods:Remove()
-            local current = states[self]
-    
-            if not current then
-                return
-            end
-    
-            local previousParent = current.parent
-    
-            local function destroy(node)
-                local childState = states[node]
-    
-                if not childState then
-                    return
-                end
-    
-                local native = childState.object
-    
-                rawset(node, "exists", false)
-                objexists[native] = nil
-                objsignals[native] = nil
-    
-                while #childState.children > 0 do
-                    destroy(childState.children[#childState.children])
-                end
-    
-                if childState.parent then
-                    erase(states[childState.parent].children, node)
-                end
-    
-                for _, signal in pairs(childState.signals) do
-                    signal:Destroy()
-                end
-    
-                if childState.shape == "Square" then
-                    erase(squares, native)
-                end
-    
-                objmts[native] = nil
-                mtobjs[node] = nil
-                objvisibles[native] = nil
-                objmtchildren[node] = nil
-    
-                states[node] = nil
-                native:Remove()
-            end
-    
-            destroy(self)
-    
-            if previousParent then
-                refresh(previousParent)
-            end
-        end
-    
-        if shape == "Square" then
-            function methods:AddListLayout(padding)
-                local current = states[self]
-    
-                current.list = true
-                current.padding = math.max(0, tonumber(padding) or 0)
-    
-                refresh(self)
-    
-                return self
-            end
-    
-            function methods:MakeScrollable()
-                local current = states[self]
-    
-                current.scrollable = true
-                current.properties.ClipsDescendants = true
-    
-                refresh(self)
-    
-                -- One wheel router for the entire drawing wrapper.
-                -- Avoid scrolling both an inner list and its outer column.
-                if not rawget(drawing, "_drawingWheelConnection") then
-                    local connection =
-                        Services.UserInputService.InputChanged:Connect(function(input)
-                            if input.UserInputType ~= Enum.UserInputType.MouseWheel
-                                or input.Position.Z == 0 then
-                                return
-                            end
-    
-                            local mouse =
-                                Services.UserInputService:GetMouseLocation()
-    
-                            local target
-                            local targetState
-    
-                            for candidate, candidateState in pairs(states) do
-                                if candidateState.scrollable
-                                    and candidateState.list
-                                    and candidateState.maximum > 0
-                                    and candidateState.effectiveVisible
-                                    and pointerinside(candidateState.hitRect, mouse) then
-    
-                                    if not targetState
-                                        or candidateState.layer > targetState.layer
-                                        or (
-                                            candidateState.layer == targetState.layer
-                                            and candidateState.depth > targetState.depth
-                                        ) then
-    
-                                        target = candidate
-                                        targetState = candidateState
-                                    end
-                                end
-                            end
-    
-                            if target then
-                                target:Scroll(
-                                    input.Position.Z > 0 and -1 or 1
-                                )
-                            end
-                        end)
-    
-                    rawset(drawing, "_drawingWheelConnection", connection)
-                end
-    
-                return self
-            end
-    
-            function methods:Scroll(direction)
-                local current = states[self]
-                direction = tonumber(direction) or 0
-            
-                if not current
-                    or not current.scrollable
-                    or direction == 0 then
-                    return false
-                end
-            
-                local step = math.max(
-                    1,
-                    tonumber(current.properties.ScrollStep) or 32
-                )
-            
-                local index = current.offset / step
-                local nextOffset
-            
-                if direction > 0 then
-                    nextOffset = (math.floor(index + 0.000001) + 1) * step
-                else
-                    nextOffset = (math.ceil(index - 0.000001) - 1) * step
-                end
-            
-                nextOffset = math.clamp(
-                    nextOffset,
-                    0,
-                    current.maximum
-                )
-            
-                if math.abs(nextOffset - current.offset) < 0.000001 then
-                    return false
-                end
-            
-                current.offset = nextOffset
-                refresh(self)
-            
-                return true
-            end
-            
-            
-            function methods:GetScrollState()
-                local current = states[self]
-    
-                return current.offset,
-                    current.maximum,
-                    current.absoluteSize.Y,
-                    current.contentSize
-            end
-    
-            function methods:RefreshScrolling()
-                states[self].offset = 0
-                refresh(self)
-            end
-        end
-    
-        local wrapper
-    
-        wrapper = setmetatable({exists = true}, {
-            __index = function(self, key)
-                local current = states[self]
-    
-                if not current then
-                    if key == "Remove" then
-                        return methods.Remove
-                    end
-    
-                    return nil
-                end
-    
-                if methods[key] then
-                    return methods[key]
-                end
-    
-                if key == "Parent" then
-                    return current.parent
-                elseif key == "Visible" then
-                    return current.visible
-                elseif key == "Position" then
-                    return current.position
-                elseif key == "Size" and current.rectangular then
-                    return current.size
-                elseif key == "AbsolutePosition" then
-                    return current.absolutePosition
-                elseif key == "AbsoluteSize" then
-                    return current.absoluteSize
-                elseif key == "AbsoluteContentSize" then
-                    return current.contentSize
-                end
-    
-                if current.shape == "Square" and signalNames[key] then
-                    if not current.signals[key] then
-                        current.signals[key] = Signal.new()
-    
-                        objsignals[object] = objsignals[object] or {
-                            inputbegan = {},
-                            mouseentered = false,
-                            mouse1down = false
-                        }
-    
-                        objsignals[object][key] = current.signals[key]
-                    end
-    
-                    return current.signals[key]
-                end
-    
-                local property = current.properties[key]
-    
-                if property ~= nil then
-                    return property
-                end
-    
-                return object[key]
-            end,
-    
-            __newindex = function(self, key, value)
-                local current = states[self]
-    
-                if not current then
-                    return
-                end
-    
-                if key == "Parent" then
-                    assert(
-                        value == nil or states[value] ~= nil,
-                        "Parent must be another drawing wrapper"
-                    )
-    
-                    if current.parent == value then
-                        return
-                    end
-    
-                    local ancestor = value
-    
-                    while ancestor do
-                        assert(
-                            ancestor ~= self,
-                            "Cannot parent a drawing to itself or its descendants"
-                        )
-    
-                        ancestor = states[ancestor].parent
-                    end
-    
-                    local previousParent = current.parent
-    
-                    if previousParent then
-                        erase(states[previousParent].children, self)
-                    end
-    
-                    current.parent = value
-    
-                    if value then
-                        table.insert(states[value].children, self)
-                    end
-    
-                    if previousParent then
-                        refresh(previousParent)
-                    end
-    
-                    refresh(self)
-                    return
-                elseif key == "Visible" then
-                    current.visible = not not value
-                    objvisibles[object] = current.visible
-                elseif key == "Position" then
-                    assert(
-                        typeof(value) == "Vector2"
-                            or typeof(value) == "UDim2",
-                        "Position must be Vector2 or UDim2"
-                    )
-    
-                    current.position = value
-                elseif key == "Size" and current.rectangular then
-                    assert(
-                        typeof(value) == "Vector2"
-                            or typeof(value) == "UDim2",
-                        "Size must be Vector2 or UDim2"
-                    )
-    
-                    current.size = value
-                elseif key == "ClipsDescendants" then
-                    current.properties.ClipsDescendants = not not value
-                elseif key == "ScrollStep" then
-                    current.properties.ScrollStep =
-                        math.max(1, tonumber(value) or 32)
-                else
-                    object[key] = value
-                end
-    
-                refresh(self)
-            end
-        })
-    
-        states[wrapper] = state
-    
+
+        B.states[wrapper] = state
+
         objexists[object] = true
         objvisibles[object] = true
         objmts[object] = wrapper
         mtobjs[wrapper] = object
         objmtchildren[wrapper] = state.children
-    
+
         if shape == "Square" then
             table.insert(squares, object)
         end
-    
-        refresh(wrapper)
-    
+
+        -- New objects appear after their initial properties are applied.
+        B.write(state, "Visible", false)
+        B.mark(state)
+
         return wrapper
     end
+
+    -- A single shared render connection processes queued changes.
+    B.lastViewport = B.viewport()
+
+    B.renderConnection = Services.RunService.RenderStepped:Connect(function()
+        local viewport = B.viewport()
+
+        if viewport ~= B.lastViewport then
+            B.lastViewport = viewport
+
+            for _, state in pairs(B.states) do
+                if not state.parent then
+                    B.mark(state)
+                end
+            end
+        end
+
+        B.flush()
+    end)
+
+    -- A single wheel router checks scroll containers, not every drawing.
+    B.wheelConnection = Services.UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseWheel
+            or input.Position.Z == 0 then
+            return
+        end
+
+        B.flush()
+
+        local mouse = Services.UserInputService:GetMouseLocation()
+        local target
+
+        for state in pairs(B.scrollables) do
+            if state.list
+                and state.effectiveVisible
+                and state.maximum > 0
+                and B.pointerInside(state.hitRect, mouse) then
+
+                if not target
+                    or state.layer > target.layer
+                    or (
+                        state.layer == target.layer
+                        and state.depth > target.depth
+                    ) then
+
+                    target = state
+                end
+            end
+        end
+
+        if target then
+            target.wrapper:Scroll(input.Position.Z > 0 and -1 or 1)
+        end
+    end)
 end
 
 -- // UI LIBRARY
