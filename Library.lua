@@ -1340,6 +1340,7 @@ do
         local viewport = B.viewport()
 
         if viewport ~= B.lastViewport then
+            print('changed')
             B.lastViewport = viewport
 
             for _, state in pairs(B.states) do
@@ -1353,7 +1354,6 @@ do
     end)
 end
 
-print('yes')
 -- // UI LIBRARY
 
 
@@ -2245,6 +2245,10 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
         Transparency = 0,
         Size = UDim2.new(1, -6, 1, -6),
         Position = UDim2.new(0, 3, 0, 3),
+    
+        -- One option per scroll step: 16px height + 3px gap.
+        ScrollStep = 19,
+    
         Parent = contentframe
     })
 
