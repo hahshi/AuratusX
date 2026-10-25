@@ -89,7 +89,8 @@ do
 
     -- Signal above is unchanged. Everything below belongs to the Drawing wrapper.
     -- Uses the existing Services and Drawing globals; no polling/render loop.
-    -- Clipping keeps fully contained primitives visible, as in the original.
+    -- Filled/transparent Squares are cropped to the inherited clipping bounds.
+    -- Other primitives still require containment; their geometry is preserved.
     -- Line/Quad/Triangle retain their native point coordinates when parented.
 
     local UserInputService = Services.UserInputService
@@ -214,7 +215,9 @@ do
 
         if oldSize.X ~= width or oldSize.Y ~= height then
             local size = vector2(width, height)
-            state.object.Size = size
+            if state.shape ~= "Square" then
+                state.object.Size = size
+            end
             state.absoluteSize = size
         end
     end
@@ -251,8 +254,28 @@ do
 
         if not oldPosition or oldPosition.X ~= x or oldPosition.Y ~= y then
             local position = vector2(x, y)
-            state.object.Position = position
+            if state.shape ~= "Square" then
+                state.object.Position = position
+            end
             state.absolutePosition = position
+        end
+    end
+
+    local function syncSquareGeometry(state, x, y, width, height)
+        -- Keep native render geometry separate from logical layout geometry.
+        -- Children and public Size/AbsoluteSize getters use the logical size.
+        local position = state.renderPosition
+        if not position or position.X ~= x or position.Y ~= y then
+            position = vector2(x, y)
+            state.object.Position = position
+            state.renderPosition = position
+        end
+
+        local size = state.renderSize
+        if not size or size.X ~= width or size.Y ~= height then
+            size = vector2(width, height)
+            state.object.Size = size
+            state.renderSize = size
         end
     end
 
@@ -271,10 +294,35 @@ do
             right, bottom = parent.clipRight, parent.clipBottom
         end
 
-        if visible and left ~= nil and state.hasPosition then
+        if visible and state.hasPosition then
             local x, y, width, height = getBounds(state)
-            visible = x >= left and y >= top
-                and x + width <= right and y + height <= bottom
+
+            if left ~= nil then
+                if state.shape == "Square" and (state.filled or state.transparency == 0) then
+                    -- utility.outline is a filled Square behind the section.
+                    -- Crop both rectangles to the viewport instead of hiding
+                    -- either rectangle when only its bottom/top is outside.
+                    local clippedLeft = max(x, left)
+                    local clippedTop = max(y, top)
+                    local clippedRight = min(x + width, right)
+                    local clippedBottom = min(y + height, bottom)
+                    visible = clippedRight > clippedLeft and clippedBottom > clippedTop
+
+                    if visible then
+                        x, y = clippedLeft, clippedTop
+                        width, height = clippedRight - clippedLeft, clippedBottom - clippedTop
+                    end
+                else
+                    -- Resizing text, images, circles, or unfilled rectangles
+                    -- would distort them or create an artificial border.
+                    visible = x >= left and y >= top
+                        and x + width <= right and y + height <= bottom
+                end
+            end
+
+            if visible and state.shape == "Square" then
+                syncSquareGeometry(state, x, y, width, height)
+            end
         end
 
         if state.effectiveVisible ~= visible then
@@ -290,7 +338,7 @@ do
 
             -- utility.outline fills a Square from (-1, -1) to (width+1,
             -- height+1). Reserve that border around scrolling viewports so
-            -- full-width section outlines are not rejected by containment.
+            -- full-width section outlines keep their one-pixel side borders.
             -- This affects clipping only, not layout or the scroll range.
             x, y = x - padding, y - padding
             width, height = width + padding * 2, height + padding * 2
@@ -882,6 +930,20 @@ do
                 return
             end
 
+            if state.shape == "Square" and (key == "Filled" or key == "Transparency") then
+                state.object[key] = value
+
+                if key == "Filled" then
+                    state.filled = value
+                else
+                    state.transparency = value
+                end
+
+                -- Either property can change whether cropping is appropriate.
+                syncVisibility(state)
+                return
+            end
+
             local changesBounds = (state.shape == "Text" and textBoundsProperties[key])
                 or (state.shape == "Circle" and key == "Radius")
 
@@ -921,6 +983,9 @@ do
             position = zero,
             size = initialSize,
             absoluteSize = initialSize,
+            renderSize = shape == "Square" and initialSize or nil,
+            filled = shape == "Square" and object.Filled or false,
+            transparency = shape == "Square" and object.Transparency or nil,
             listOffset = 0,
             scrollOffset = 0,
             mouseEntered = false
@@ -1015,8 +1080,9 @@ do
     end
 
     local function isMouseOver(state, x, y)
-        local position = state.absolutePosition
-        local size = state.absoluteSize
+        -- A partially clipped Square only accepts input in its visible area.
+        local position = state.renderPosition
+        local size = state.renderSize
         return x >= position.X and y >= position.Y
             and x <= position.X + size.X and y <= position.Y + size.Y
     end
