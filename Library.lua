@@ -1712,7 +1712,9 @@ function library.createlistscrollbar(contentframe, contentholder)
 end
 
 
-function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent, parenttypes)
+function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent, parenttypes, listHeaderHeight)
+    listHeaderHeight = listHeaderHeight or 14
+
     local dropdown = utility.create("Square", {
         Filled = true,
         Visible = not islist,
@@ -1762,7 +1764,7 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
         Thickness = 0,
         Theme = "Object Background",
         Size = UDim2.new(1, 0, 0, 0),
-        Position = islist and UDim2.new(0, 0, 0, 14) or UDim2.new(0, 0, 1, 6),
+        Position = islist and UDim2.new(0, 0, 0, listHeaderHeight) or UDim2.new(0, 0, 1, 6),
         ZIndex = 12,
         Parent = islist and holder or dropdown
     })
@@ -1857,14 +1859,20 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
                 contentframe.Size = UDim2.new(1, 0, 0, contentholder.AbsoluteContentSize + 6)
 
                 if islist then
-                    holder.Size = UDim2.new(1, 0, 0, contentholder.AbsoluteContentSize + 20)
+                    holder.Size = UDim2.new(
+                        1, 0,
+                        0, contentholder.AbsoluteContentSize + 6 + listHeaderHeight
+                    )
                 end
             end
         else
             contentframe.Size = UDim2.new(1, 0, 0, contentholder.AbsoluteContentSize + 6)
 
             if islist then
-                holder.Size = UDim2.new(1, 0, 0, contentholder.AbsoluteContentSize + 20)
+                holder.Size = UDim2.new(
+                    1, 0,
+                    0, contentholder.AbsoluteContentSize + 6 + listHeaderHeight
+                )
             end
         end
 
@@ -3866,50 +3874,54 @@ function library:Load(loadoptions)
 
             function sectiontypes:List(options)
                 utility.table(options)
+            
                 local name = options.name
+                local hasName = name ~= nil and name ~= ""
+                local headerHeight = hasName and 14 or 0
+            
+                local content = type(options.content) == "table"
+                    and options.content or {}
+            
+                local max = options.max and options.max > 1
+                    and options.max or nil
+            
                 local default = options.default
-                local content = type(options.content) == "table" and options.content or {}
-                local max = options.max and (options.max > 1 and options.max) or nil
                 local scrollable = options.scrollable
                 local scrollingmax = options.scrollingmax or 10
                 local flag = options.flag or utility.nextflag()
                 local callback = options.callback or function(...) end
-
-                if not max and type(default) == "table" then
-                    default = nil
-                end
-
-                if max and default == nil then
-                    default = {}
-                end
-
-                if type(default) == "table" then
-                    if max then
-                        for i, opt in next, default do
-                            if not table.find(content, opt) then
-                                table.remove(default, i)
-                            elseif i > max then
-                                table.remove(default, i)
+            
+                if max then
+                    local selected = {}
+            
+                    if type(default) == "table" then
+                        for _, option in ipairs(default) do
+                            if table.find(content, option)
+                                and not table.find(selected, option) then
+                                table.insert(selected, option)
+            
+                                if #selected >= max then
+                                    break
+                                end
                             end
                         end
-                    else
-                        default = nil
                     end
-                elseif default ~= nil then
-                    if not table.find(content, default) then
-                        default = nil
-                    end
+            
+                    default = selected
+                elseif type(default) == "table"
+                    or not table.find(content, default) then
+                    default = nil
                 end
-
+            
                 local holder = utility.create("Square", {
                     Transparency = 0,
-                    Size = UDim2.new(1, 0, 0, 29),
+                    Size = UDim2.new(1, 0, 0, headerHeight + 6),
                     Parent = sectioncontent
                 })
-
-                if name then
+            
+                if hasName then
                     utility.create("Text", {
-                        Text = name,
+                        Text = tostring(name),
                         Font = Drawing.Fonts.Plex,
                         Size = 13,
                         Position = UDim2.new(0, 0, 0, -2),
@@ -3919,11 +3931,27 @@ function library:Load(loadoptions)
                         Parent = holder
                     })
                 end
-
-
-                section.Size = UDim2.new(1, 0, 0, sectioncontent.AbsoluteContentSize + 28)
-
-                return library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, true, section, sectioncontent, sectiontypes)
+            
+                section.Size = UDim2.new(
+                    1, 0,
+                    0, sectioncontent.AbsoluteContentSize + 28
+                )
+            
+                return library.createdropdown(
+                    holder,
+                    content,
+                    flag,
+                    callback,
+                    default,
+                    max,
+                    scrollable,
+                    scrollingmax,
+                    true,
+                    section,
+                    sectioncontent,
+                    sectiontypes,
+                    headerHeight
+                )
             end
 
             function sectiontypes:ColorPicker(pickeroptions)
