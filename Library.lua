@@ -3331,11 +3331,23 @@ function library.createkeybind(default, parent, blacklist, flag, callback, offse
     end
 
     function keybindtypes:GetHolding()
+        local UIS = Services.UserInputService
+    
+        if Services.UserInputService:GetFocusedTextBox() then
+            return false
+        end
+    
+        if typeof(key) ~= "EnumItem" then
+            return false
+        end
+    
         if key == Enum.UserInputType.MouseButton1 or key == Enum.UserInputType.MouseButton2 then
             return Services.UserInputService:IsMouseButtonPressed(key)
-        else
+        elseif key.EnumType == Enum.KeyCode and key ~= Enum.KeyCode.Unknown then
             return Services.UserInputService:IsKeyDown(key)
         end
+    
+        return false
     end
 
     return keybindtypes
@@ -4291,7 +4303,7 @@ function library:Load(loadoptions)
             
                 return library.createslider(min, max, holder, text, default, float, flag, callback, sectiontypes)
             end
-            
+
             function sectiontypes:Dropdown(options)
                 utility.table(options)
                 local name = options.name
