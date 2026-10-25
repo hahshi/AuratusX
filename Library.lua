@@ -3330,9 +3330,7 @@ function library.createkeybind(default, parent, blacklist, flag, callback, offse
         set(newkey)
     end
 
-    function keybindtypes:GetHolding()
-        local UIS = Services.UserInputService
-    
+    function keybindtypes:GetHolding()    
         if Services.UserInputService:GetFocusedTextBox() then
             return false
         end
