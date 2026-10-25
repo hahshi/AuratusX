@@ -253,643 +253,697 @@ do
     end)
 
     function drawing:new(shape)
-        local obj = Drawing.new(shape)
-        objexists[obj] = true
-        local signalnames = {}
-
-        local listfunc
-        local scrollfunc
-        local refreshscrolling
-
-        if shape == "Square" then
-            table.insert(squares, obj)
-
-            signalnames = {
-                MouseButton1Click = Signal.new(),
-                MouseButton1Up = Signal.new(),
-                MouseButton1Down = Signal.new(),
-                MouseButton2Click = Signal.new(),
-                MouseButton2Up = Signal.new(),
-                MouseButton2Down = Signal.new(),
-                InputBegan = Signal.new(),
-                InputEnded = Signal.new(),
-                InputChanged = Signal.new(),
-                MouseEnter = Signal.new(),
-                MouseLeave = Signal.new(),
-                MouseMoved = Signal.new()
+        -- Shared by every object created through this constructor.
+        local states = rawget(drawing, "_drawingStates")
+    
+        if not states then
+            states = {}
+            rawset(drawing, "_drawingStates", states)
+        end
+    
+        local function vector(value, reference)
+            if typeof(value) == "UDim2" then
+                return udim2tovector2(value, reference)
+            end
+    
+            return value
+        end
+    
+        local function rectangle(position, size)
+            return {
+                left = position.X,
+                top = position.Y,
+                right = position.X + size.X,
+                bottom = position.Y + size.Y
             }
-
-            local attemptedscrollable = false
-
-            scrollfunc = function(self)
-                if listobjs[self] then
-                    scrollpositions[self] = 0
-                    scrollobjs[self] = true
-
-                    self.ClipsDescendants = true
-
-                    local function scroll(amount)
-                        local currentclippedobj, docontinue = nil, false
-
-                        for _, object in next, listchildren[self] do
-                            if amount == 1 then
-                                if object.Position.Y > mtobjs[self].Position.Y then
-                                    if not istouching(object.Position, object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                        if not currentclippedobj then
-                                            currentclippedobj = object
-                                        end
-
-                                        docontinue = true
-                                    end
-                                end
-                            end
-
-                            if amount == -1 then
-                                if object.Position.Y <= mtobjs[self].Position.Y then
-                                    if not istouching(object.Position, object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                        currentclippedobj = object
-                                        docontinue = true
-                                    end
-                                end
-                            end
-                        end
-
-                        if docontinue then
-                            if amount > 0 then
-                                local poschange = -(currentclippedobj.Size.Y + objpaddings[self])
-                                local closestobj
-
-                                for _, object in next, objchildren[self] do
-                                    if istouching(object.Position + Vector2.new(0, poschange), object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                        closestobj = object
-                                        break
-                                    end
-                                end
-
-                                local diff = (Vector2.new(0, mtobjs[self].Position.Y) - Vector2.new(0, (closestobj.Position.Y + poschange + objpaddings[self]))).magnitude
-
-                                if custompropertygets[mtobjs[self]]("ClipsDescendants") then
-                                    for _, object in next, objchildren[self] do
-                                        if not istouching(object.Position + Vector2.new(0, poschange - diff + objpaddings[self]), object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                            object.Visible = false
-                                            childrenvisupdates[objmts[object]](objmts[object], false)
-                                        else
-                                            object.Visible = true
-                                            childrenvisupdates[objmts[object]](objmts[object], true)
-                                        end
-                                    end
-                                end
-
-                                scrollpositions[self] = scrollpositions[self] + (poschange - diff + objpaddings[self])
-
-                                for _, object in next, objchildren[self] do
-                                    childrenposupdates[objmts[object]](objmts[object], object.Position + Vector2.new(0, poschange - diff + objpaddings[self]))
-                                    object.Position = object.Position + Vector2.new(0, poschange - diff + objpaddings[self])
-                                end
-                            else
-                                local poschange = currentclippedobj.Size.Y + objpaddings[self]
-
-                                if custompropertygets[mtobjs[self]]("ClipsDescendants") then
-                                    for _, object in next, objchildren[self] do
-                                        if not istouching(object.Position + Vector2.new(0, poschange), object.Size, mtobjs[self].Position, mtobjs[self].Size) then
-                                            object.Visible = false
-                                            childrenvisupdates[objmts[object]](objmts[object], false)
-                                        else
-                                            object.Visible = true
-                                            childrenvisupdates[objmts[object]](objmts[object], true)
-                                        end
-                                    end
-                                end
-
-                                scrollpositions[self] = scrollpositions[self] + poschange
-
-                                for _, object in next, objchildren[self] do
-                                    childrenposupdates[objmts[object]](objmts[object], object.Position + Vector2.new(0, poschange))
-                                    object.Position = object.Position + Vector2.new(0, poschange)
-                                end
-                            end
-                        end
-
-                        return docontinue
+        end
+    
+        local function intersect(a, b)
+            if not a then
+                return b
+            end
+    
+            return {
+                left = math.max(a.left, b.left),
+                top = math.max(a.top, b.top),
+                right = math.min(a.right, b.right),
+                bottom = math.min(a.bottom, b.bottom)
+            }
+        end
+    
+        local function nonempty(rect)
+            return rect
+                and rect.right > rect.left
+                and rect.bottom > rect.top
+        end
+    
+        local function contains(outer, inner)
+            if not outer then
+                return true
+            end
+    
+            return nonempty(outer)
+                and inner.left >= outer.left
+                and inner.top >= outer.top
+                and inner.right <= outer.right
+                and inner.bottom <= outer.bottom
+        end
+    
+        local function pointerinside(rect, point)
+            return nonempty(rect)
+                and point.X >= rect.left
+                and point.Y >= rect.top
+                and point.X < rect.right
+                and point.Y < rect.bottom
+        end
+    
+        local function erase(array, value)
+            local index = table.find(array, value)
+    
+            if index then
+                table.remove(array, index)
+            end
+        end
+    
+        -- Measure logical sizes before applying any clipping.
+        local function measure(node, parentSize)
+            local state = states[node]
+            local object = state.object
+    
+            if state.rectangular then
+                local size = vector(state.size, parentSize)
+    
+                state.absoluteSize = Vector2.new(
+                    math.max(0, math.floor(size.X)),
+                    math.max(0, math.floor(size.Y))
+                )
+            elseif state.shape == "Text" then
+                state.absoluteSize = object.TextBounds
+            elseif state.shape == "Circle" then
+                local diameter = object.Radius * 2
+                state.absoluteSize = Vector2.new(diameter, diameter)
+            else
+                state.absoluteSize = Vector2.new(0, 0)
+            end
+    
+            local total = 0
+    
+            for index, child in ipairs(state.children) do
+                measure(child, state.absoluteSize)
+    
+                if state.list then
+                    if index > 1 then
+                        total = total + state.padding
                     end
-
-                    rawset(self, "Scroll", function(_, direction)
-                        if direction == 0 then
-                            return false
-                        end
-
-                        return scroll(direction > 0 and 1 or -1)
-                    end)
-
-                    rawset(self, "GetScrollState", function()
-                        local viewport = math.max(0, mtobjs[self].Size.Y)
-                        local total = math.max(0, listcontents[self] or 0)
-                        local offset = math.max(0, -(scrollpositions[self] or 0))
-
-                        return offset, math.max(0, total - viewport), viewport, total
-                    end)
-
-                    refreshscrolling = function()
-                        repeat
-                        until
-                            not scroll(-1)
+    
+                    total = total + states[child].absoluteSize.Y
+                end
+            end
+    
+            state.contentSize = total
+            state.maximum = math.max(0, total - state.absoluteSize.Y)
+    
+            if state.scrollable then
+                state.offset = math.clamp(
+                    state.offset,
+                    0,
+                    state.maximum
+                )
+            else
+                state.offset = 0
+            end
+        end
+    
+        -- Position using logical geometry; clip only the native drawing.
+        local function place(
+            node,
+            position,
+            parentVisible,
+            inheritedClip,
+            parentLayer,
+            depth
+        )
+            local state = states[node]
+            local object = state.object
+    
+            position = Vector2.new(
+                math.floor(position.X),
+                math.floor(position.Y)
+            )
+    
+            state.absolutePosition = position
+            state.effectiveVisible = parentVisible and state.visible
+            state.layer = math.max(parentLayer, object.ZIndex)
+            state.depth = depth
+    
+            local bounds = rectangle(position, state.absoluteSize)
+            state.hitRect = intersect(inheritedClip, bounds)
+    
+            if state.rectangular then
+                -- Restore logical geometry before calculating this frame's crop.
+                object.Position = position
+                object.Size = state.absoluteSize
+    
+                if state.shape == "Square" then
+                    local cropped = state.hitRect
+    
+                    if inheritedClip
+                        and (object.Filled or object.Transparency == 0) then
+    
+                        object.Position = Vector2.new(
+                            cropped.left,
+                            cropped.top
+                        )
+    
+                        object.Size = Vector2.new(
+                            math.max(0, cropped.right - cropped.left),
+                            math.max(0, cropped.bottom - cropped.top)
+                        )
+    
+                        object.Visible = state.effectiveVisible
+                            and nonempty(cropped)
+                    else
+                        -- Cropping an unfilled square would invent new borders.
+                        object.Visible = state.effectiveVisible
+                            and nonempty(bounds)
+                            and contains(inheritedClip, bounds)
                     end
-
-                    self.InputChanged:Connect(function(input)
-                        if input.UserInputType == Enum.UserInputType.MouseWheel then
-                            if input.Position.Z > 0 then
-                                scroll(-1)
-                            else
-                                scroll(1)
-                            end
-                        end
-                    end)
                 else
-                    attemptedscrollable = true
+                    -- Drawing images do not expose a texture crop rectangle.
+                    object.Visible = state.effectiveVisible
+                        and nonempty(bounds)
+                        and contains(inheritedClip, bounds)
                 end
+            elseif state.shape == "Text" then
+                object.Position = position
+    
+                local textSize = object.TextBounds
+                local left = position.X
+    
+                if object.Center then
+                    left = left - textSize.X / 2
+                end
+    
+                local outline = object.Outline and 1 or 0
+    
+                local textBounds = {
+                    left = left - outline,
+                    top = position.Y - outline,
+                    right = left + textSize.X + outline,
+                    bottom = position.Y + textSize.Y + outline
+                }
+    
+                object.Visible = state.effectiveVisible
+                    and contains(inheritedClip, textBounds)
+            elseif state.shape == "Circle" then
+                object.Position = position
+    
+                local radius = object.Radius
+    
+                local circleBounds = {
+                    left = position.X - radius,
+                    top = position.Y - radius,
+                    right = position.X + radius,
+                    bottom = position.Y + radius
+                }
+    
+                object.Visible = state.effectiveVisible
+                    and contains(inheritedClip, circleBounds)
+            else
+                -- Line, Triangle and Quad points remain absolute.
+                local points = {object.PointA, object.PointB}
+    
+                if state.shape ~= "Line" then
+                    table.insert(points, object.PointC)
+                end
+    
+                if state.shape == "Quad" then
+                    table.insert(points, object.PointD)
+                end
+    
+                local pointBounds = {
+                    left = math.huge,
+                    top = math.huge,
+                    right = -math.huge,
+                    bottom = -math.huge
+                }
+    
+                for _, point in ipairs(points) do
+                    pointBounds.left = math.min(pointBounds.left, point.X)
+                    pointBounds.top = math.min(pointBounds.top, point.Y)
+                    pointBounds.right = math.max(pointBounds.right, point.X)
+                    pointBounds.bottom = math.max(pointBounds.bottom, point.Y)
+                end
+    
+                object.Visible = state.effectiveVisible
+                    and contains(inheritedClip, pointBounds)
             end
-
-            listfunc = function(self, padding)
-                objpaddings[self] = padding
-                listcontents[self] = 0
-                listchildren[self] = {}
-                listindexes[self] = {}
-                listadds[self] = {}
-
-                listobjs[self] = true
-
-                for _, object in next, objchildren[self] do
-                    table.insert(listchildren[self], object)
-                    table.insert(listindexes[self], listcontents[self] + (#listchildren[self] == 1 and 0 or padding))
-
-                    local newpos = mtobjs[self].Position + Vector2.new(0, listcontents[self] + (#listchildren[self] == 1 and 0 or padding))
-                    object.Position = newpos
-                    
-                    childrenposupdates[object](objmts[object], newpos)
-
-                    custompropertysets[object]("AbsolutePosition", newpos)
-                    
-                    listadds[self][object] = object.Size.Y + (#listchildren[self] == 1 and 0 or padding)
-                    listcontents[self] = listcontents[self] + object.Size.Y + (#listchildren[self] == 1 and 0 or padding)
+    
+            local childClip = inheritedClip
+    
+            if state.properties.ClipsDescendants then
+                childClip = intersect(inheritedClip, bounds)
+            end
+    
+            local cursor = 0
+    
+            for index, child in ipairs(state.children) do
+                local childState = states[child]
+                local childPosition
+    
+                if state.list then
+                    if index > 1 then
+                        cursor = cursor + state.padding
+                    end
+    
+                    childPosition = position + Vector2.new(
+                        0,
+                        cursor - state.offset
+                    )
+    
+                    cursor = cursor + childState.absoluteSize.Y
+                else
+                    childPosition = position + vector(
+                        childState.position,
+                        state.absoluteSize
+                    )
                 end
-
-                if attemptedscrollable then
-                    scrollfunc(self)
-                end
+    
+                -- Propagate logical visibility, not the cropped parent's
+                -- native Visible value. A tall section must not hide its children.
+                place(
+                    child,
+                    childPosition,
+                    state.effectiveVisible,
+                    childClip,
+                    state.layer,
+                    depth + 1
+                )
             end
         end
-
-        local customproperties = {
-            ClipsDescendants = false
+    
+        local function refresh(node)
+            if not states[node] then
+                return
+            end
+    
+            local root = node
+    
+            while states[root].parent do
+                root = states[root].parent
+            end
+    
+            local camera = workspace.CurrentCamera
+            local viewport = camera
+                and camera.ViewportSize
+                or Vector2.new(0, 0)
+    
+            measure(root, viewport)
+    
+            place(
+                root,
+                vector(states[root].position, viewport),
+                true,
+                nil,
+                -math.huge,
+                0
+            )
+        end
+    
+        local object = Drawing.new(shape)
+    
+        local rectangular = shape == "Square" or shape == "Image"
+        local methods = {}
+    
+        local signalNames = {
+            MouseButton1Click = true,
+            MouseButton1Up = true,
+            MouseButton1Down = true,
+            MouseButton2Click = true,
+            MouseButton2Up = true,
+            MouseButton2Down = true,
+            InputBegan = true,
+            InputEnded = true,
+            InputChanged = true,
+            MouseEnter = true,
+            MouseLeave = true,
+            MouseMoved = true
         }
-
-        custompropertysets[obj] = function(k, v)
-            customproperties[k] = v
+    
+        local state = {
+            object = object,
+            shape = shape,
+            rectangular = rectangular,
+    
+            position = Vector2.new(0, 0),
+            size = rectangular and object.Size or nil,
+    
+            absolutePosition = Vector2.new(0, 0),
+            absoluteSize = Vector2.new(0, 0),
+    
+            parent = nil,
+            children = {},
+            visible = true,
+            effectiveVisible = true,
+    
+            list = false,
+            padding = 0,
+            contentSize = 0,
+    
+            scrollable = false,
+            offset = 0,
+            maximum = 0,
+    
+            signals = {},
+    
+            properties = {
+                ClipsDescendants = false,
+                ScrollStep = 32
+            }
+        }
+    
+        function methods:GetChildren()
+            return states[self].children
         end
-
-        custompropertygets[obj] = function(k)
-            return customproperties[k]
+    
+        function methods:Remove()
+            local current = states[self]
+    
+            if not current then
+                return
+            end
+    
+            local previousParent = current.parent
+    
+            local function destroy(node)
+                local childState = states[node]
+    
+                if not childState then
+                    return
+                end
+    
+                local native = childState.object
+    
+                rawset(node, "exists", false)
+                objexists[native] = nil
+                objsignals[native] = nil
+    
+                while #childState.children > 0 do
+                    destroy(childState.children[#childState.children])
+                end
+    
+                if childState.parent then
+                    erase(states[childState.parent].children, node)
+                end
+    
+                for _, signal in pairs(childState.signals) do
+                    signal:Destroy()
+                end
+    
+                if childState.shape == "Square" then
+                    erase(squares, native)
+                end
+    
+                objmts[native] = nil
+                mtobjs[node] = nil
+                objvisibles[native] = nil
+                objmtchildren[node] = nil
+    
+                states[node] = nil
+                native:Remove()
+            end
+    
+            destroy(self)
+    
+            if previousParent then
+                refresh(previousParent)
+            end
         end
-
-        local mt = setmetatable({exists = true}, {
-            __index = function(self, k)
-                if k == "Parent" then
-                    return customproperties.Parent
-                end
-
-                if k == "Visible" then
-                    return objvisibles[obj]
-                end
-
-                if k == "Position" then
-                    return udim2posobjs[obj] or objpositions[obj] or obj[k]
-                end
-
-                if k == "Size" then
-                    return udim2sizeobjs[obj] or obj[k]
-                end
-
-                if k == "AddListLayout" and listfunc then
-                    return listfunc
-                end
-
-                if k == "MakeScrollable" and scrollfunc then
-                    return scrollfunc
-                end
-
-                if k == "RefreshScrolling" and refreshscrolling then
-                    return refreshscrolling
-                end
-
-                if k == "AbsoluteContentSize" then
-                    return listcontents[self]
-                end
-
-                if k == "GetChildren" then
-                    return function(self)
-                        return objmtchildren[self]
-                    end
-                end
-
-                if k == "Remove" then
-                    return function(self)
-                        rawset(self, "exists", false)
-                        objexists[obj] = false
-
-                        if customproperties.Parent and listobjs[customproperties.Parent] then
-                            local objindex = table.find(objchildren[customproperties.Parent], obj)
-
-                            listcontents[customproperties.Parent] = listcontents[customproperties.Parent] - listadds[customproperties.Parent][obj]
-            
-                            for i, object in next, objchildren[customproperties.Parent] do
-                                if i > objindex then
-                                    object.Position = object.Position - Vector2.new(0, listadds[customproperties.Parent][obj])
+    
+        if shape == "Square" then
+            function methods:AddListLayout(padding)
+                local current = states[self]
+    
+                current.list = true
+                current.padding = math.max(0, tonumber(padding) or 0)
+    
+                refresh(self)
+    
+                return self
+            end
+    
+            function methods:MakeScrollable()
+                local current = states[self]
+    
+                current.scrollable = true
+                current.properties.ClipsDescendants = true
+    
+                refresh(self)
+    
+                -- One wheel router for the entire drawing wrapper.
+                -- Avoid scrolling both an inner list and its outer column.
+                if not rawget(drawing, "_drawingWheelConnection") then
+                    local connection =
+                        Services.UserInputService.InputChanged:Connect(function(input)
+                            if input.UserInputType ~= Enum.UserInputType.MouseWheel
+                                or input.Position.Z == 0 then
+                                return
+                            end
+    
+                            local mouse =
+                                Services.UserInputService:GetMouseLocation()
+    
+                            local target
+                            local targetState
+    
+                            for candidate, candidateState in pairs(states) do
+                                if candidateState.scrollable
+                                    and candidateState.list
+                                    and candidateState.maximum > 0
+                                    and candidateState.effectiveVisible
+                                    and pointerinside(candidateState.hitRect, mouse) then
+    
+                                    if not targetState
+                                        or candidateState.layer > targetState.layer
+                                        or (
+                                            candidateState.layer == targetState.layer
+                                            and candidateState.depth > targetState.depth
+                                        ) then
+    
+                                        target = candidate
+                                        targetState = candidateState
+                                    end
                                 end
                             end
-
-                            if table.find(listchildren[customproperties.Parent], obj) then
-                                table.remove(listchildren[customproperties.Parent], table.find(listchildren[customproperties.Parent], obj))
+    
+                            if target then
+                                target:Scroll(
+                                    input.Position.Z > 0 and -1 or 1
+                                )
                             end
-
-                            if table.find(objchildren[customproperties.Parent], obj) then
-                                table.remove(objchildren[customproperties.Parent], table.find(objchildren[customproperties.Parent], obj))
-                                table.remove(listindexes[customproperties.Parent], table.find(objchildren[customproperties.Parent], obj))
-                            end
-                        end
-
-                        if table.find(squares, mtobjs[self]) then
-                            table.remove(squares, table.find(squares, mtobjs[self]))
-                        end
-                        
-                        for _, object in next, objchildren[self] do
-                            if objexists[object] then
-                                table.remove(objsignals, table.find(objsignals, object))
-                                objmts[object]:Remove()
-                            end
-                        end
-
-                        table.remove(objsignals, table.find(objsignals, obj))
-                        obj:Remove()
-                    end
+                        end)
+    
+                    rawset(drawing, "_drawingWheelConnection", connection)
                 end
-
-                if signalnames[k] then
-                    objsignals[obj] = objsignals[obj] or {}
-                    
-                    if not objsignals[obj][k] then
-                        objsignals[obj][k] = signalnames[k]
-                    end
-
-                    objsignals[obj].inputbegan = objsignals[obj].inputbegan or {}
-                    objsignals[obj].mouseentered = objsignals[obj].mouseentered or {}
-                    objsignals[obj].mouse1down = objsignals[obj].mouse1down or {}
-
-                    return signalnames[k]
+    
+                return self
+            end
+    
+            function methods:Scroll(direction)
+                local current = states[self]
+    
+                if not current.scrollable or direction == 0 then
+                    return false
                 end
-
-                return customproperties[k] or obj[k]
+    
+                local step = math.max(
+                    1,
+                    tonumber(current.properties.ScrollStep) or 32
+                )
+    
+                local offset = math.clamp(
+                    current.offset + (direction > 0 and step or -step),
+                    0,
+                    current.maximum
+                )
+    
+                if offset == current.offset then
+                    return false
+                end
+    
+                current.offset = offset
+                refresh(self)
+    
+                return true
+            end
+    
+            function methods:GetScrollState()
+                local current = states[self]
+    
+                return current.offset,
+                    current.maximum,
+                    current.absoluteSize.Y,
+                    current.contentSize
+            end
+    
+            function methods:RefreshScrolling()
+                states[self].offset = 0
+                refresh(self)
+            end
+        end
+    
+        local wrapper
+    
+        wrapper = setmetatable({exists = true}, {
+            __index = function(self, key)
+                local current = states[self]
+    
+                if not current then
+                    if key == "Remove" then
+                        return methods.Remove
+                    end
+    
+                    return nil
+                end
+    
+                if methods[key] then
+                    return methods[key]
+                end
+    
+                if key == "Parent" then
+                    return current.parent
+                elseif key == "Visible" then
+                    return current.visible
+                elseif key == "Position" then
+                    return current.position
+                elseif key == "Size" and current.rectangular then
+                    return current.size
+                elseif key == "AbsolutePosition" then
+                    return current.absolutePosition
+                elseif key == "AbsoluteSize" then
+                    return current.absoluteSize
+                elseif key == "AbsoluteContentSize" then
+                    return current.contentSize
+                end
+    
+                if current.shape == "Square" and signalNames[key] then
+                    if not current.signals[key] then
+                        current.signals[key] = Signal.new()
+    
+                        objsignals[object] = objsignals[object] or {
+                            inputbegan = {},
+                            mouseentered = false,
+                            mouse1down = false
+                        }
+    
+                        objsignals[object][key] = current.signals[key]
+                    end
+    
+                    return current.signals[key]
+                end
+    
+                local property = current.properties[key]
+    
+                if property ~= nil then
+                    return property
+                end
+    
+                return object[key]
             end,
-
-            __newindex = function(self, k, v)
-                local changechildrenvis
-                changechildrenvis = function(parent, vis)
-                    if objchildren[parent] then
-                        for _, object in next, objchildren[parent] do
-                            if (custompropertygets[mtobjs[parent]]("ClipsDescendants") and not istouching(object.Position, object.Size, mtobjs[parent].Position, mtobjs[parent].Size)) then
-                                object.Visible = false
-                                changechildrenvis(objmts[object], false)
-                            else
-                                object.Visible = vis and objvisibles[object] or false
-                                changechildrenvis(objmts[object], vis and objvisibles[object] or false)
-                            end
-                        end
-                    end
-                end
-
-                childrenvisupdates[self] = changechildrenvis
-
-                if k == "Visible" then
-                    objvisibles[obj] = v
-
-                    if customproperties.Parent and (not mtobjs[customproperties.Parent].Visible or (custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") and not istouching(obj.Position, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size))) then
-                        v = false
-                    end
-
-                    changechildrenvis(self, v)
-                end
-
-                if k == "ClipsDescendants" then
-                    customproperties.ClipsDescendants = v
-
-                    for _, object in next, objchildren[self] do
-                        object.Visible = v and (istouching(object.Position, object.Size, obj.Position, obj.Size) and objvisibles[object] or false) or objvisibles[object]
-                    end
-
+    
+            __newindex = function(self, key, value)
+                local current = states[self]
+    
+                if not current then
                     return
                 end
-
-                local changechildrenpos
-                changechildrenpos = function(parent, val)
-                    if objchildren[parent] then
-                        if listobjs[parent] then
-                            for i, object in next, objchildren[parent] do
-                                local newpos = val + Vector2.new(0, listindexes[parent][i])
-        
-                                if scrollobjs[parent] then
-                                    newpos = val + Vector2.new(0, listindexes[parent][i] + scrollpositions[parent])
-                                end
-
-                                newpos = Vector2.new(math.floor(newpos.X), math.floor(newpos.Y))
-
-                                object.Position = newpos
-                                custompropertysets[object]("AbsolutePosition", newpos)
-
-                                changechildrenpos(objmts[object], newpos)
-                            end
-                        else
-                            for _, object in next, objchildren[parent] do
-                                local newpos = val + objpositions[object]
-                                newpos = Vector2.new(math.floor(newpos.X), math.floor(newpos.Y))
-
-                                object.Position = newpos
-
-                                custompropertysets[object]("AbsolutePosition", newpos)
-                                
-                                changechildrenpos(objmts[object], newpos)
-                            end
-                        end
+    
+                if key == "Parent" then
+                    assert(
+                        value == nil or states[value] ~= nil,
+                        "Parent must be another drawing wrapper"
+                    )
+    
+                    if current.parent == value then
+                        return
                     end
-                end
-
-                childrenposupdates[self] = changechildrenpos
-
-                if k == "Position" then
-                    if typeof(v) == "UDim2" then
-                        udim2posobjs[obj] = v
-                        
-                        if customproperties.Parent then
-                            objpositions[obj] = udim2tovector2(v, mtobjs[customproperties.Parent].Size)
-
-                            if listobjs[customproperties.Parent] then
-                                return
-                            else
-                                v = mtobjs[customproperties.Parent].Position + udim2tovector2(v, mtobjs[customproperties.Parent].Size)
-                            end
-                        else
-                            local newpos = udim2tovector2(v, workspace.CurrentCamera.ViewportSize)
-                            objpositions[obj] = newpos
-                            v = newpos
-                        end
-
-                        customproperties.AbsolutePosition = v
-
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            obj.Visible = istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false
-                            changechildrenvis(self, istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false)
-                        end
-
-                        changechildrenpos(self, v)
-                    else
-                        objpositions[obj] = v
-
-                        if customproperties.Parent then
-                            if listobjs[customproperties.Parent] then
-                                return
-                            else
-                                v = mtobjs[customproperties.Parent].Position + v
-                            end
-                        end
-
-                        customproperties.AbsolutePosition = v
-
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            obj.Visible = istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false
-                            changechildrenvis(self, istouching(v, obj.Size, mtobjs[customproperties.Parent].Position, mtobjs[customproperties.Parent].Size) and objvisibles[obj] or false)
-                        end
-
-                        changechildrenpos(self, v)
+    
+                    local ancestor = value
+    
+                    while ancestor do
+                        assert(
+                            ancestor ~= self,
+                            "Cannot parent a drawing to itself or its descendants"
+                        )
+    
+                        ancestor = states[ancestor].parent
                     end
-                end
-
-                local changechildrenudim2pos
-                changechildrenudim2pos = function(parent, val)
-                    if objchildren[parent] and not listobjs[parent] then
-                        for _, object in next, objchildren[parent] do
-                            if udim2posobjs[object] then
-                                local newpos = mtobjs[parent].Position + udim2tovector2(udim2posobjs[object], val)
-                                newpos = Vector2.new(math.floor(newpos.X), math.floor(newpos.Y))
-                                
-                                object.Position = newpos
-
-                                custompropertysets[object]("AbsolutePosition", newpos)
-                                objpositions[object] = udim2tovector2(udim2posobjs[object], val)
-                                changechildrenpos(objmts[object], newpos)
-                            end
-                        end
+    
+                    local previousParent = current.parent
+    
+                    if previousParent then
+                        erase(states[previousParent].children, self)
                     end
-                end
-
-                local changechildrenudim2size
-                changechildrenudim2size = function(parent, val)
-                    if objchildren[parent] then
-                        for _, object in next, objchildren[parent] do
-                            if udim2sizeobjs[object] then
-                                local newsize = udim2tovector2(udim2sizeobjs[object], val)
-                                object.Size = newsize
-
-                                if custompropertygets[mtobjs[parent]]("ClipsDescendants") then
-                                    object.Visible = istouching(object.Position, object.Size, mtobjs[parent].Position, mtobjs[parent].Size) and objvisibles[object] or false
-                                end
-
-                                custompropertysets[object]("AbsoluteSize", newsize)
-
-                                changechildrenudim2size(objmts[object], newsize)
-                                changechildrenudim2pos(objmts[object], newsize)
-                            end
-                        end
+    
+                    current.parent = value
+    
+                    if value then
+                        table.insert(states[value].children, self)
                     end
-                end
-
-                if k == "Size" then
-                    if typeof(v) == "UDim2" then
-                        udim2sizeobjs[obj] = v 
-
-                        if customproperties.Parent then
-                            v = udim2tovector2(v, mtobjs[customproperties.Parent].Size)
-                        else
-                            v = udim2tovector2(v, workspace.CurrentCamera.ViewportSize)
-                        end
-
-                        if customproperties.Parent and listobjs[customproperties.Parent] then
-                            local oldsize = obj.Size.Y
-                            local sizediff = v.Y - oldsize
-
-                            local objindex = table.find(objchildren[customproperties.Parent], obj)
-
-                            listcontents[customproperties.Parent] = listcontents[customproperties.Parent] + sizediff
-                            listadds[customproperties.Parent][obj] = listadds[customproperties.Parent][obj] + sizediff
-
-                            for i, object in next, objchildren[customproperties.Parent] do
-                                if i > objindex then
-                                    object.Position = object.Position + Vector2.new(0, sizediff)
-                                    listindexes[customproperties.Parent][i] = listindexes[customproperties.Parent][i] + sizediff
-                                end
-                            end
-                        end
-
-                        customproperties.AbsoluteSize = v
-
-                        changechildrenudim2size(self, v)
-                        changechildrenudim2pos(self, v)
-
-                        if customproperties.ClipsDescendants then
-                            for _, object in next, objchildren[self] do
-                                object.Visible = istouching(object.Position, object.Size, obj.Position, v) and objvisibles[object] or false
-                            end
-                        end
-
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            local parent = mtobjs[customproperties.Parent]
-                        
-                            local visible = parent.Visible
-                                and objvisibles[obj]
-                                and istouching(obj.Position, v, parent.Position, parent.Size)
-                                or false
-                        
-                            obj.Visible = visible
-                            changechildrenvis(self, visible)
-                        end
-                    else
-                        if customproperties.Parent and listobjs[customproperties.Parent] then
-                            local oldsize = obj.Size.Y
-                            local sizediff = v.Y - oldsize
-
-                            local objindex = table.find(objchildren[customproperties.Parent], obj)
-
-                            listcontents[customproperties.Parent] = listcontents[customproperties.Parent] + sizediff
-                            listadds[customproperties.Parent][obj] = listadds[customproperties.Parent][obj] + sizediff
-
-                            for i, object in next, objchildren[customproperties.Parent] do
-                                if i > objindex then
-                                    object.Position = object.Position + Vector2.new(0, sizediff)
-                                    listcontents[customproperties.Parent] = listcontents[customproperties.Parent] + sizediff
-                                    listindexes[customproperties.Parent][i] = listindexes[customproperties.Parent][i] + sizediff
-                                end
-                            end
-                        end
-
-                        customproperties.AbsoluteSize = v
-
-                        changechildrenudim2size(self, v)
-                        changechildrenudim2pos(self, v)
-
-                        if customproperties.ClipsDescendants then
-                            for _, object in next, objchildren[self] do
-                                object.Visible = istouching(object.Position, object.Size, obj.Position, v) and objvisibles[object] or false
-                            end
-                        end
-                        if customproperties.Parent and custompropertygets[mtobjs[customproperties.Parent]]("ClipsDescendants") then
-                            local parent = mtobjs[customproperties.Parent]
-                        
-                            local visible = parent.Visible
-                                and objvisibles[obj]
-                                and istouching(obj.Position, v, parent.Position, parent.Size)
-                                or false
-                        
-                            obj.Visible = visible
-                            changechildrenvis(self, visible)
-                        end
+    
+                    if previousParent then
+                        refresh(previousParent)
                     end
-
-                    if typeof(v) == "Vector2" then
-                        v = Vector2.new(math.floor(v.X), math.floor(v.Y))
-                    end
-                end
-
-                if k == "Parent" then
-                    assert(type(v) == "table", "Invalid type " .. type(v) .. " for parent")
-
-                    table.insert(objchildren[v], obj)
-                    table.insert(objmtchildren[v], self)
-
-                    changechildrenvis(v, mtobjs[v].Visible)
-
-                    if udim2sizeobjs[obj] then
-                        local newsize = udim2tovector2(udim2sizeobjs[obj], mtobjs[v].Size)
-                        obj.Size = newsize
-
-                        if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                            obj.Visible = istouching(obj.Position, newsize, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                        end
-
-                        changechildrenudim2pos(self, newsize)
-                    end
-
-                    if listobjs[v] then
-                        table.insert(listchildren[v], obj)
-                        table.insert(listindexes[v], listcontents[v] + (#listchildren[v] == 1 and 0 or objpaddings[v]))
-
-                        local newpos = Vector2.new(0, listcontents[v] + (#listchildren[v] == 1 and 0 or objpaddings[v]))
-
-                        if scrollobjs[v] then
-                            newpos = Vector2.new(0, listcontents[v] + (#listchildren[v] == 1 and 0 or objpaddings[v]) + scrollpositions[v])
-                        end
-
-                        listadds[v][obj] = obj.Size.Y + (#listchildren[v] == 1 and 0 or objpaddings[v])
-
-                        listcontents[v] = listcontents[v] + obj.Size.Y + (#listchildren[v] == 1 and 0 or objpaddings[v])
-
-                        obj.Position = newpos
-
-                        customproperties.AbsolutePosition = newpos
-
-                        changechildrenpos(self, newpos)
-                    end
-
-                    if udim2posobjs[obj] then
-                        local newpos = mtobjs[v].Position + udim2tovector2(udim2posobjs[obj], mtobjs[v].Size)
-                        objpositions[obj] = udim2tovector2(udim2posobjs[obj], mtobjs[v].Size)
-                        obj.Position = newpos
-                        customproperties.AbsolutePosition = newpos
-
-                        if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                            obj.Visible = istouching(newpos, obj.Size, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                        end
-
-                        changechildrenpos(self, newpos)
-                    elseif shape ~= "Line" and shape ~= "Quad" and shape ~= "Triangle" then
-                        local newpos = mtobjs[v].Position + obj.Position
-                        obj.Position = newpos
-                        customproperties.AbsolutePosition = newpos
-
-                        if custompropertygets[mtobjs[v]]("ClipsDescendants") then
-                            obj.Visible = istouching(newpos, obj.Size, mtobjs[v].Position, mtobjs[v].Size) and objvisibles[obj] or false
-                        end
-
-                        changechildrenpos(self, newpos)
-                    end
-
-                    customproperties.Parent = v
-                    self.Visible = objvisibles[obj]
+    
+                    refresh(self)
                     return
+                elseif key == "Visible" then
+                    current.visible = not not value
+                    objvisibles[object] = current.visible
+                elseif key == "Position" then
+                    assert(
+                        typeof(value) == "Vector2"
+                            or typeof(value) == "UDim2",
+                        "Position must be Vector2 or UDim2"
+                    )
+    
+                    current.position = value
+                elseif key == "Size" and current.rectangular then
+                    assert(
+                        typeof(value) == "Vector2"
+                            or typeof(value) == "UDim2",
+                        "Size must be Vector2 or UDim2"
+                    )
+    
+                    current.size = value
+                elseif key == "ClipsDescendants" then
+                    current.properties.ClipsDescendants = not not value
+                elseif key == "ScrollStep" then
+                    current.properties.ScrollStep =
+                        math.max(1, tonumber(value) or 32)
+                else
+                    object[key] = value
                 end
-
-                obj[k] = v
+    
+                refresh(self)
             end
         })
-
-        objmts[obj] = mt
-        mtobjs[mt] = obj
-        objchildren[mt] = {}
-        objmtchildren[mt] = {}
-
-        if shape ~= "Line" and shape ~= "Quad" and shape ~= "Triangle" then
-            mt.Position = Vector2.new(0, 0)
+    
+        states[wrapper] = state
+    
+        objexists[object] = true
+        objvisibles[object] = true
+        objmts[object] = wrapper
+        mtobjs[wrapper] = object
+        objmtchildren[wrapper] = state.children
+    
+        if shape == "Square" then
+            table.insert(squares, object)
         end
-
-        mt.Visible = true
-
-        return mt
+    
+        refresh(wrapper)
+    
+        return wrapper
     end
 end
 
