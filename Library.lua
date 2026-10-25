@@ -2070,16 +2070,46 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
 
     local dropdowntypes = utility.table({}, true, parenttypes)
 
-    if islist and listButtons then
+    function dropdowntypes:EnableAll()
+        local selected = {}
+    
+        for _, option in next, content do
+            if optioninstances[option]
+                and not table.find(selected, option) then
+                table.insert(selected, option)
+            end
+        end
+    
+        if not max then
+            chosen = {}
+        end
+    
+        max = math.huge
+        set(selected)
+    
+        return self
+    end
+    
+    function dropdowntypes:DisableAll()
+        if max then
+            set({})
+        else
+            set(nil)
+        end
+    
+        return self
+    end
+
+    if listButtons then
         local function createListButton(text, x, onclick)
             local button = utility.create("Square", {
                 Filled = true,
                 Thickness = 0,
                 Theme = "Object Background",
-                Size = UDim2.new(0, 68, 0, 14),
+                Size = UDim2.new(0, 84, 0, 18),
                 Position = UDim2.new(
                     0, x,
-                    0, listHeaderHeight - 18
+                    0, listHeaderHeight - 22
                 ),
                 ZIndex = 14,
                 Parent = holder
@@ -2087,17 +2117,22 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
     
             utility.outline(button, "Object Border")
     
-            utility.create("Text", {
+            local label = utility.create("Text", {
                 Text = text,
                 Font = Drawing.Fonts.Plex,
-                Size = 12,
+                Size = 13,
                 Center = true,
                 Outline = true,
                 Theme = "Text",
-                Position = UDim2.new(0.5, 0, 0, 0),
+                Position = UDim2.new(0.5, 0, 0, 1),
                 ZIndex = 15,
                 Parent = button
             })
+    
+            label.Position = UDim2.new(
+                0.5, 0,
+                0.5, -math.floor(label.TextBounds.Y / 2)
+            )
     
             button.MouseEnter:Connect(function()
                 button.Color = utility.changecolor(
@@ -2115,21 +2150,11 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
         end
     
         createListButton("Enable all", 0, function()
-            local selected = {}
-    
-            -- Read the current entries, including additions and refreshes.
-            for _, option in ipairs(content) do
-                if optioninstances[option]
-                    and not table.find(selected, option) then
-                    table.insert(selected, option)
-                end
-            end
-    
-            set(selected)
+            dropdowntypes:EnableAll()
         end)
-    
-        createListButton("Disable all", 100, function()
-            set({})
+
+        createListButton("Disable all", 90, function()
+            dropdowntypes:DisableAll()
         end)
     end
 
@@ -3943,8 +3968,9 @@ function library:Load(loadoptions)
                 local buttons = options.buttons == true
             
                 local headerHeight = (hasName and 14 or 0)
-                    + (buttons and 18 or 0)
-            
+                + (buttons and 22 or 0)
+
+
                 local content = type(options.content) == "table"
                     and options.content or {}
             
