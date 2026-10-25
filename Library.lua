@@ -1712,7 +1712,7 @@ function library.createlistscrollbar(contentframe, contentholder)
 end
 
 
-function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent, parenttypes, listHeaderHeight)
+function library.createdropdown(holder, content, flag, callback, default, max, scrollable, scrollingmax, islist, section, sectioncontent, parenttypes, listHeaderHeight, listButtons)
     listHeaderHeight = listHeaderHeight or 14
 
     local dropdown = utility.create("Square", {
@@ -2070,6 +2070,69 @@ function library.createdropdown(holder, content, flag, callback, default, max, s
 
     local dropdowntypes = utility.table({}, true, parenttypes)
 
+    if islist and listButtons then
+        local function createListButton(text, x, onclick)
+            local button = utility.create("Square", {
+                Filled = true,
+                Thickness = 0,
+                Theme = "Object Background",
+                Size = UDim2.new(0, 68, 0, 14),
+                Position = UDim2.new(
+                    0, x,
+                    0, listHeaderHeight - 18
+                ),
+                ZIndex = 14,
+                Parent = holder
+            })
+    
+            utility.outline(button, "Object Border")
+    
+            utility.create("Text", {
+                Text = text,
+                Font = Drawing.Fonts.Plex,
+                Size = 11,
+                Center = true,
+                Outline = true,
+                Theme = "Text",
+                Position = UDim2.new(0.5, 0, 0, 0),
+                ZIndex = 15,
+                Parent = button
+            })
+    
+            button.MouseEnter:Connect(function()
+                button.Color = utility.changecolor(
+                    library.theme["Object Background"], 3
+                )
+            end)
+    
+            button.MouseLeave:Connect(function()
+                button.Color = library.theme["Object Background"]
+            end)
+    
+            button.MouseButton1Click:Connect(onclick)
+    
+            return button
+        end
+    
+        createListButton("Enable all", 0, function()
+            local selected = {}
+    
+            -- Read the current entries, including additions and refreshes.
+            for _, option in ipairs(content) do
+                if optioninstances[option]
+                    and not table.find(selected, option) then
+                    table.insert(selected, option)
+                end
+            end
+    
+            set(selected)
+        end)
+    
+        createListButton("Disable all", 72, function()
+            set({})
+        end)
+    end
+    
     function dropdowntypes:Set(option)
         set(option)
     end
@@ -3877,13 +3940,20 @@ function library:Load(loadoptions)
             
                 local name = options.name
                 local hasName = name ~= nil and name ~= ""
-                local headerHeight = hasName and 14 or 0
+                local buttons = options.buttons == true
+            
+                local headerHeight = (hasName and 14 or 0)
+                    + (buttons and 18 or 0)
             
                 local content = type(options.content) == "table"
                     and options.content or {}
             
                 local max = options.max and options.max > 1
                     and options.max or nil
+            
+                if buttons then
+                    max = math.huge
+                end
             
                 local default = options.default
                 local scrollable = options.scrollable
@@ -3893,6 +3963,11 @@ function library:Load(loadoptions)
             
                 if max then
                     local selected = {}
+            
+                    if buttons and default ~= nil
+                        and type(default) ~= "table" then
+                        default = {default}
+                    end
             
                     if type(default) == "table" then
                         for _, option in ipairs(default) do
@@ -3950,10 +4025,11 @@ function library:Load(loadoptions)
                     section,
                     sectioncontent,
                     sectiontypes,
-                    headerHeight
+                    headerHeight,
+                    buttons
                 )
             end
-
+            
             function sectiontypes:ColorPicker(pickeroptions)
                 utility.table(pickeroptions)
                 local pickername = pickeroptions.name
