@@ -148,20 +148,6 @@ getgenv().hiddeninstance = getgenv().hideinstance
 getgenv().unhideobject = getgenv().unhideinstance
 
 
-getgenv().setparent = function(instance, newParent)
-    local connections = {}
-    appendConnections(connections, newParent.DescendantAdded)
-    appendConnections(connections, newParent.ChildAdded)
-
-    for _, parent in pairs(getparents(newParent)) do
-        appendConnections(connections, parent.DescendantAdded)
-        appendConnections(connections, parent.ChildAdded)
-    end
-
-    local disabled = disableC(connections)
-    instance.Parent = newParent
-    enableC(disabled)
-end
 
 do
     local OldNewIndex
@@ -172,7 +158,7 @@ do
             local Method = Args[2]
 
             if Method == "Parent" then
-                setrawproperty(...)
+                setparent(Args[1], Args[3])
                 return
             end
         end
@@ -187,6 +173,22 @@ do
 
         local disabled = disableC(connections)
         OldNewIndex(instance, property, value)
+        print('protected')
+        enableC(disabled)
+    end
+
+    getgenv().setparent = function(instance, newParent)
+        local connections = {}
+        appendConnections(connections, newParent.DescendantAdded)
+        appendConnections(connections, newParent.ChildAdded)
+    
+        for _, parent in pairs(getparents(newParent)) do
+            appendConnections(connections, parent.DescendantAdded)
+            appendConnections(connections, parent.ChildAdded)
+        end
+    
+        local disabled = disableC(connections)
+        OldNewIndex(instance, "Parent", newParent)
         print('protected')
         enableC(disabled)
     end
