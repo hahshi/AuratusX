@@ -187,6 +187,7 @@ do
 
         local disabled = disableC(connections)
         OldNewIndex(instance, property, value)
+        print('protected')
         enableC(disabled)
     end
 end
