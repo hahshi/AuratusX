@@ -64,6 +64,8 @@ do
     end))
 end
 
+
+
 local function appendConnections(list, signal)
     for _, connection in pairs(getconnections(signal)) do
         list[#list + 1] = connection
@@ -96,16 +98,6 @@ getgenv().enableC = function(connections)
     return changed
 end
 
-getgenv().setrawproperty = function(instance, property, value)
-    local connections = {}
-    appendConnections(connections, instance.Changed)
-    appendConnections(connections, instance:GetPropertyChangedSignal(property))
-
-    local disabled = disableC(connections)
-    instance[property] = value
-    enableC(disabled)
-end
-
 getgenv().isdescendant = function(instance, ancestor)
     local current = instance.Parent
 
@@ -132,9 +124,16 @@ getgenv().getparents = function(instance)
     return parents
 end
 
-getgenv().hideinstance = function(instance)
+getgenv().hideinstance = function(instance, props)
     if typeof(instance) == "Instance" then
         Hidden[instance] = true
+    elseif typeof(instance) == "string" then
+        local obj = Instance.new(instance)
+        Hidden[obj] = true
+
+        for prop, value in props do
+            obj[prop] = value
+        end
     end
 end
 
@@ -145,6 +144,7 @@ getgenv().unhideinstance = function(instance)
 end
 
 getgenv().hideobject = getgenv().hideinstance
+getgenv().hiddeninstance = getgenv().hideinstance
 getgenv().unhideobject = getgenv().unhideinstance
 
 
@@ -161,4 +161,32 @@ getgenv().setparent = function(instance, newParent)
     local disabled = disableC(connections)
     instance.Parent = newParent
     enableC(disabled)
+end
+
+do
+    local OldNewIndex
+    OldNewIndex = hookmetamethod(game, "__newindex", newcclosure(function(...)
+        local Args = {...}
+        local Self = Args[1]
+        if Hidden[Self] then
+            local Method = Args[2]
+
+            if Method == "Parent" then
+                setrawproperty(...)
+                return
+            end
+        end
+
+        return OldNewIndex(...)
+    end))
+
+    getgenv().setrawproperty = function(instance, property, value)
+        local connections = {}
+        appendConnections(connections, instance.Changed)
+        appendConnections(connections, instance:GetPropertyChangedSignal(property))
+
+        local disabled = disableC(connections)
+        OldNewIndex(instance, property, value)
+        enableC(disabled)
+    end
 end
