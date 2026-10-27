@@ -1596,6 +1596,8 @@ function library:SaveConfig(name, universal)
         local config = Services.HttpService:JSONEncode(configtbl)
         local folderpath = string.format("%s//%s", self.folder, placeid)
 
+        print(folderpath)
+
         if not isfolder(folderpath) then 
             makefolder(folderpath) 
         end
