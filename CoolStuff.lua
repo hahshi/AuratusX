@@ -131,9 +131,13 @@ getgenv().hideinstance = function(instance, props)
         local obj = Instance.new(instance)
         Hidden[obj] = true
 
-        for prop, value in props do
-            obj[prop] = value
+        if props then
+            for prop, value in props do
+                obj[prop] = value
+            end
         end
+
+        return obj
     end
 end
 
