@@ -149,6 +149,8 @@ end
 
 getgenv().hideobject = getgenv().hideinstance
 getgenv().hiddeninstance = getgenv().hideinstance
+getgenv().createinstance = getgenv().hideinstance
+
 getgenv().unhideobject = getgenv().unhideinstance
 
 

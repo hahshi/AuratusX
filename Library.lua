@@ -1605,6 +1605,8 @@ function library:SaveConfig(name, universal)
         local filepath = string.format("%s//%s.%s", folderpath, name, self.extension)
         writefile(filepath, config)
     else
+        print("improper name")
+
         return false, "improper name"
     end
 end
